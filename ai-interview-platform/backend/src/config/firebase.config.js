@@ -74,14 +74,19 @@ const serviceAccount = {
   /*
     privateKey - The RSA private key for signing
     
-    IMPORTANT: The key in .env has literal "\n" strings.
+    IMPORTANT: The key in .env may have literal "\n" strings or \\n.
                We need to replace them with actual newline characters.
     
     WHY: Environment variables don't support real newlines easily,
          so we store them as "\n" text and convert here.
+         
+    HANDLING BOTH FORMATS:
+    - If the .env file has: "...KEY...\n..."  → dotenv reads it as literal \n
+    - If copied directly: "...KEY...\\n..."   → needs double replacement
   */
   privateKey: process.env.FIREBASE_PRIVATE_KEY
-    ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n')
+    ? process.env.FIREBASE_PRIVATE_KEY
+        .replace(/\\n/g, '\n')  // Handle literal \n (most common)
     : undefined
 };
 

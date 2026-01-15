@@ -13,13 +13,20 @@ import { AuthService } from "../services/auth.service";
 
 function DashboardPage() {
   
-  // Get user from store
-  // Get user and profile from store
-  const { user, profile } = useAuthStore(function(state) {
-    return { 
-      user: state.user,
-      profile: state.profile 
-    };
+  /*
+    Get user and profile from store using SEPARATE selectors
+    
+    WHY SEPARATE? 
+    If we return an object like { user, profile }, React sees 
+    a "new" object every render and causes an infinite loop.
+    Using separate selectors returns primitives/stable references.
+  */
+  const user = useAuthStore(function(state) {
+    return state.user;
+  });
+  
+  const profile = useAuthStore(function(state) {
+    return state.profile;
   });
 
   // Handler for logout
