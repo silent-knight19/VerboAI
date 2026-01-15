@@ -1,0 +1,37 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // =========================================================================
+    // USERS COLLECTION
+    // =========================================================================
+    
+    // Pattern: users/{userId}
+    match /users/{userId} {
+      
+      /*
+        READ: Allow ONLY if the requesting user's UID matches the document ID.
+              This prevents users from reading each other's profiles.
+      */
+      allow read: if request.auth != null && request.auth.uid == userId;
+      
+      /*
+        WRITE: DENY ALL WRITES FROM CLIENT.
+               All user creation/updates happen on the BACKEND via Admin SDK.
+               This prevents users from changing their own role to 'admin' 
+               or faking their credits.
+      */
+      allow write: if false;
+    }
+    
+    
+    // =========================================================================
+    // DEFAULT UNMATCHED
+    // =========================================================================
+    match /{document=**} {
+      // By default, deny everything else to be safe
+      allow read, write: if false;
+    }
+  }
+}

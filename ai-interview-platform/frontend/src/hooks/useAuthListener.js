@@ -62,64 +62,74 @@ import useAuthStore from "../store/auth.store";
 function useAuthListener() {
   
   /*
-    Get the init function from our auth store
+    Get the init and fetchProfile functions from our auth store
     
-    ROLE: We need init() to start the Firebase listener
-    WHY:  The listener is defined in the store, not here
-    HOW:  useAuthStore takes a "selector" function that picks what we want
-          state => state.init means "give me the init function"
+    ROLE: 
+      - init() starts the Firebase listener
+      - fetchProfile() calls /api/me to sync with Firestore
   */
   const initFunction = useAuthStore(function (state) {
     return state.init;
   });
+  
+  const fetchProfileFunction = useAuthStore(function (state) {
+    return state.fetchProfile;
+  });
 
   /*
-    useEffect - Run side effect code
-    
-    ROLE: Set up the auth listener when component mounts
-    WHY:  We can't just call init() directly because:
-          - It would run on every re-render
-          - We need to clean up when component unmounts
-    HOW:
-      1. First argument: a function containing our code
-      2. Second argument: dependency array []
-         - [] means "run this only once when component mounts"
-         - If we put [initFunction], it would re-run if initFunction changes
+    Get the current user to know when to fetch the profile
+  */
+  const user = useAuthStore(function (state) {
+    return state.user;
+  });
+  
+  const loading = useAuthStore(function (state) {
+    return state.loading;
+  });
+
+  /*
+    Effect 1: Start the Firebase auth listener on mount
   */
   useEffect(function () {
     
     console.log("🎧 useAuthListener: Setting up Firebase auth listener...");
 
-    /*
-      Call init() to start the listener
-      
-      ROLE: This starts Firebase watching for auth changes
-      WHY:  Firebase will tell us if user is logged in
-      HOW:  init() returns an "unsubscribe" function (to stop listening later)
-    */
     const stopListening = initFunction();
 
-    /*
-      Return a cleanup function
-      
-      ROLE: Stops the listener when component unmounts
-      WHY:  Prevents MEMORY LEAKS
-            - If we don't clean up, the listener keeps running forever
-            - Even after the component is gone, it would still be active
-            - This wastes memory and can cause bugs
-      HOW:  Whatever function we return from useEffect runs on cleanup
-            React calls this when:
-            - The component unmounts (disappears from screen)
-            - Before re-running the effect (if dependencies change)
-    */
     return function cleanup() {
       console.log("🧹 useAuthListener: Cleaning up auth listener...");
       stopListening();
     };
 
   }, []);
-  // ^^^ Empty array [] = run only once on mount
-  // If we wanted to re-run when something changes, we'd put that variable here
+
+  /*
+    Effect 2: Fetch profile from backend when user is detected
+    
+    ROLE: Sync the user with Firestore via /api/me
+    WHY:  
+      - First login: Creates the user in Firestore
+      - Returning login: Updates lastLoginAt
+      - Both: Populates the `profile` state with app-specific data
+    
+    WHEN: Runs after Firebase auth confirms we have a user
+    DEPENDENCIES: [user, loading] - re-runs when these change
+  */
+  useEffect(function () {
+    
+    // Wait until Firebase finishes checking auth state
+    if (loading) {
+      return;
+    }
+    
+    // Only fetch if we have a user
+    if (user) {
+      console.log("📡 useAuthListener: User detected, syncing with backend...");
+      fetchProfileFunction();
+    }
+    
+  }, [user, loading]);
+  // ^^^ Re-runs when user or loading changes
 
 }
 

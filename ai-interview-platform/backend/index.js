@@ -78,6 +78,23 @@ const cors = require('cors');
 */
 const dotenv = require('dotenv');
 
+/*
+  verifyFirebaseToken - Our authentication middleware
+  
+  ROLE: Verifies Firebase ID tokens on protected routes
+  WHY:  Prevents unauthorized access to sensitive endpoints
+  HOW:  Place it before any route handler that needs protection
+*/
+const { verifyFirebaseToken } = require('./src/middleware/authMiddleware');
+
+/*
+  UserService - Firestore operations for users
+  
+  ROLE: Create, read, and update user documents in Firestore
+  WHY:  Keeps database logic separate from route handlers
+*/
+const UserService = require('./src/services/user.service');
+
 
 // =============================================================================
 // CONFIGURATION
@@ -241,6 +258,80 @@ app.get('/health', function (req, res) {
     message: 'Server is healthy',
     timestamp: new Date().toISOString()
   });
+});
+
+
+/*
+  Protected route - GET /api/me
+  
+  ROLE: The "Who Am I" endpoint — syncs user with Firestore
+  WHY:  This is the SINGLE point where users are created/updated in Firestore.
+        - First login: Creates a new user document
+        - Returning user: Updates lastLoginAt
+  HOW:  
+    1. verifyFirebaseToken runs first (the middleware)
+    2. If token is valid, req.user is populated with { uid, email, ... }
+    3. We call UserService.getOrCreateUser() to sync with Firestore
+    4. We return the full Firestore profile to the frontend
+  
+  SECURITY: Only accessible with a valid Firebase ID token!
+*/
+app.get('/api/me', verifyFirebaseToken, async function (req, res) {
+  
+  console.log('📧 /api/me: Processing request for UID:', req.user.uid);
+  
+  try {
+    /*
+      Prepare user data from the verified token
+      
+      req.user was set by verifyFirebaseToken middleware.
+      We pass this to UserService to create/update the Firestore document.
+    */
+    const tokenUser = {
+      uid: req.user.uid,
+      email: req.user.email,
+      displayName: req.user.name || null,
+      photoURL: req.user.picture || null,
+      authProvider: 'google' // For now, we only support Google
+    };
+    
+    /*
+      getOrCreateUser - The core sync logic
+      
+      Returns:
+      - user: The Firestore user document
+      - isNewUser: true if this was their first login
+    */
+    const { user, isNewUser } = await UserService.getOrCreateUser(tokenUser);
+    
+    if (isNewUser) {
+      console.log('🎉 /api/me: New user created in Firestore!');
+    } else {
+      console.log('👋 /api/me: Returning user, updated lastLoginAt');
+    }
+    
+    /*
+      Return the full Firestore profile
+      
+      The frontend will store this in auth.store as `profile`.
+      This is richer than just the token data because it includes
+      our app-specific fields like role, onboardingCompleted, etc.
+    */
+    res.json({
+      success: true,
+      user: user,
+      isNewUser: isNewUser
+    });
+    
+  } catch (error) {
+    console.error('❌ /api/me: Error syncing user:', error);
+    
+    res.status(500).json({
+      success: false,
+      error: 'Failed to sync user profile',
+      message: error.message
+    });
+  }
 });
 
 

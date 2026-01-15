@@ -41,6 +41,13 @@ import { auth } from '../services/firebase';
 */
 import { onAuthStateChanged, signOut } from 'firebase/auth';
 
+/*
+  ApiService - Our HTTP client for backend calls
+  
+  ROLE: Used to call /api/me to fetch the Firestore profile
+*/
+import { ApiService } from '../services/api.service';
+
 
 // =============================================================================
 // CREATE THE STORE
@@ -94,6 +101,22 @@ const useAuthStore = create(function (set) {
       WHY:  We can display this to the user (like "Login failed")
     */
     error: null,
+
+    /*
+      profile - The user's profile from Firestore (via /api/me)
+      
+      ROLE: Contains app-specific data like role, onboardingCompleted, credits
+      WHY:  Firebase Auth only knows identity; Firestore knows the "product user"
+      STRUCTURE: { uid, email, displayName, role, onboardingCompleted, ... }
+    */
+    profile: null,
+
+    /*
+      profileLoading - Whether we're fetching the profile from the backend
+      
+      ROLE: Allows the UI to show a loading state during profile fetch
+    */
+    profileLoading: false,
 
 
     // =========================================================================
@@ -170,8 +193,8 @@ const useAuthStore = create(function (set) {
         // Tell Firebase to sign out the current user
         await signOut(auth);
         
-        // Clear user from our store
-        set({ user: null });
+        // Clear user AND profile from our store
+        set({ user: null, profile: null });
         
         console.log("✅ Logout successful");
         
@@ -181,6 +204,65 @@ const useAuthStore = create(function (set) {
         
         // Store the error so UI can display it
         set({ error: err.message });
+      }
+    },
+
+    /*
+      setProfile(data) - Manually set the profile
+      
+      ROLE: Update the profile state directly
+      WHY:  Used by fetchProfile or when we need to update profile data
+    */
+    setProfile: function (profileData) {
+      set({ profile: profileData });
+    },
+
+    /*
+      fetchProfile() - Fetch the user's profile from the backend
+      
+      ROLE: Calls GET /api/me to sync with Firestore
+      WHY:  This is how we get the "product user" data (role, onboarding, etc.)
+            It also triggers user creation on first login!
+      HOW:
+        1. Set profileLoading to true
+        2. Call ApiService.get('/api/me')
+        3. Store the returned profile
+        4. Handle errors gracefully
+    */
+    fetchProfile: async function () {
+      console.log("📥 AuthStore: Fetching profile from backend...");
+      
+      set({ profileLoading: true });
+      
+      try {
+        const response = await ApiService.get('/api/me');
+        
+        if (response.success && response.user) {
+          console.log("✅ AuthStore: Profile received", response.user.uid);
+          
+          set({
+            profile: response.user,
+            profileLoading: false
+          });
+          
+          if (response.isNewUser) {
+            console.log("🎉 AuthStore: This is a new user!");
+          }
+          
+          return response.user;
+        } else {
+          throw new Error('Invalid response from /api/me');
+        }
+        
+      } catch (err) {
+        console.error("❌ AuthStore: Failed to fetch profile:", err);
+        
+        set({
+          profileLoading: false,
+          error: err.message || 'Failed to load profile'
+        });
+        
+        return null;
       }
     },
 

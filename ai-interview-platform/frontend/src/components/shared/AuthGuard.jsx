@@ -2,21 +2,12 @@
 ================================================================================
 AUTH GUARD COMPONENT
 ================================================================================
-ROLE: This component protects routes that require authentication.
-WHY:  Some pages should only be visible to logged-in users (like Dashboard).
-      If someone tries to visit these pages without logging in, we redirect them.
-HOW:  It wraps around protected content and checks if user is logged in.
-================================================================================
-
-USAGE:
-  <AuthGuard>
-    <Dashboard />   {/* Only visible to logged-in users */}
-  </AuthGuard>
-
-THIS IS CALLED A "HIGHER-ORDER COMPONENT" (HOC) PATTERN:
-  - It takes some components as children
-  - It adds extra logic (checking auth)
-  - It either renders the children or redirects
+ROLE: This component acts as a "Bouncer" for your protected pages.
+WHY:  Certain parts of our app (like the Dashboard) are private. We don't want 
+      strangers seeing them! If someone isn't logged in, they shouldn't be here.
+HOW:  It wraps around a protected component. 
+      - If you are logged in: It lets you through (returns 'children').
+      - If you are NOT logged in: It grabs you and sends you to the Login page.
 ================================================================================
 */
 
@@ -25,101 +16,56 @@ THIS IS CALLED A "HIGHER-ORDER COMPONENT" (HOC) PATTERN:
 // =============================================================================
 
 /*
-  Navigate - Component that redirects to another page
+  Navigate - A specialized component for redirection
+  useLocation - A hook that tells us WHERE we are currently in the app
   
-  ROLE: Programmatically navigates to a different route
-  WHY:  If user isn't logged in, we want to send them to /login
-  HOW:  <Navigate to="/login" /> immediately redirects to /login
+  ROLE: Navigate automatically changes the URL when it's rendered.
+        useLocation helps us remember where the user was trying to go 
+        so we can send them back there after they log in.
 */
 import { Navigate, useLocation } from "react-router-dom";
 
 /*
-  useLocation - Hook to get current URL location
-  
-  ROLE: Tells us what page the user is trying to visit
-  WHY:  After they log in, we want to redirect them BACK to where they wanted to go
-  HOW:  Returns { pathname, search, hash, state, key }
-*/
-
-/*
-  useAuthStore - Our Zustand store for auth state
-  
-  ROLE: Gives us access to user and loading state
-  WHY:  We need to check if user is logged in
+  useAuthStore - Access our global authentication state
 */
 import useAuthStore from "../../store/auth.store";
 
 
 // =============================================================================
-// THE COMPONENT
+// COMPONENT
 // =============================================================================
 
-/*
-  AuthGuard(props) - Protected route wrapper component
-  
-  ROLE: Wraps content that should only be visible to authenticated users
-  WHY:  Security - we don't want unauthorized users seeing private pages
-  HOW:
-    1. Check if we're still loading (checking auth status)
-       - If yes, show loading spinner
-    2. Check if user is logged in
-       - If no, redirect to /login
-    3. If user is logged in
-       - Render the children (the protected content)
-  
-  PROPS:
-    - children: The content to show if user is logged in
-                Example: <AuthGuard><Dashboard /></AuthGuard>
-                Here, <Dashboard /> is the children
-*/
 function AuthGuard(props) {
   
   /*
-    Extract children from props
+    children - The content we are trying to protect
     
-    ROLE: Get the content we're supposed to protect
-    WHY:  Whatever is inside <AuthGuard>...</AuthGuard> becomes props.children
-    
-    EXAMPLE:
-      <AuthGuard>
-        <SecretPage />
-      </AuthGuard>
-      
-      Here, props.children = <SecretPage />
+    In App.jsx, we use it like this: 
+    <AuthGuard><DashboardPage /></AuthGuard>
+    Here, <DashboardPage /> is the "children".
   */
   const children = props.children;
 
+  // ===========================================================================
+  // STATE ACCESS
+  // ===========================================================================
+
   /*
-    Get user from the auth store
-    
-    ROLE: Check if someone is logged in
-    WHY:  We need to know if we should show the content or redirect
-    HOW:  useAuthStore takes a selector function
-          state => state.user means "give me just the user property"
+    Retrieve user and loading status from our global store.
   */
   const user = useAuthStore(function (state) {
     return state.user;
   });
   
-  /*
-    Get loading state from the auth store
-    
-    ROLE: Check if we're still determining auth status
-    WHY:  On app load, we don't immediately know if user is logged in
-          Firebase needs a moment to check
-          We don't want to redirect during this check
-  */
   const isLoading = useAuthStore(function (state) {
     return state.loading;
   });
 
   /*
-    Get current location (URL)
-    
-    ROLE: Remember where the user was trying to go
-    WHY:  After login, we can redirect them back here
-    HOW:  We pass this to the login page in the state
-          The login page can then redirect here after successful login
+    Capture the current URL path.
+    We'll save this and pass it to the Login page so the app can say:
+    "Oh, you were trying to visit the Dashboard? I'll send you back there 
+    now that you've finished logging in."
   */
   const currentLocation = useLocation();
 
@@ -129,39 +75,34 @@ function AuthGuard(props) {
   // ===========================================================================
 
   /*
-    CASE 1: Still loading
+    CASE 1: Still Checking (Loading)
     
-    ROLE: Show loading indicator while we check auth status
-    WHY:  On first load, Firebase needs time to check if there's an active session
-          (The user might already be logged in from before)
-          If we immediately redirected, logged-in users would briefly see login page
-    HOW:  Return a simple loading UI
+    Firebase needs a split second to check the user's cookies. 
+    During this time, we show a clean "Authenticating..." spinner so the user 
+    doesn't see a "flicker" of the login page or an empty screen.
   */
   if (isLoading) {
     return (
-      <div style={styles.loadingContainer}>
-        <p style={styles.loadingText}>Checking authentication...</p>
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-10 h-10 border-3 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+          <p className="text-slate-500 font-medium">Authenticating...</p>
+        </div>
       </div>
     );
   }
 
   /*
-    CASE 2: Not logged in
+    CASE 2: No User (Access Denied)
     
-    ROLE: Redirect to login page
-    WHY:  User is trying to access protected content without being logged in
-    HOW:  Render a <Navigate> component which causes a redirect
+    If the check is finished and 'user' is still null, it means they are logged out.
+    We use <Navigate /> to force the browser to go to /login.
     
-    IMPORTANT PROPS:
-    - to="/login": Where to redirect
-    - state={{ from: currentLocation }}: Pass current location to login page
-      This lets login page redirect back here after login
-    - replace: Replace current history entry instead of adding new one
-      This prevents "back button loops" (clicking back just goes to login again)
+    We also pass the 'currentLocation' inside the 'state' prop. 
+    This is like giving the login page a "return ticket".
   */
   if (!user) {
     console.log("🚫 AuthGuard: No user found, redirecting to login...");
-    
     return (
       <Navigate 
         to="/login" 
@@ -172,56 +113,13 @@ function AuthGuard(props) {
   }
 
   /*
-    CASE 3: User is logged in
+    CASE 3: User Authenticated (Access Granted!)
     
-    ROLE: Show the protected content
-    WHY:  User has passed the auth check, they're allowed to see this
-    HOW:  Just return the children (the content inside <AuthGuard>)
+    If we reached this point, the user is valid! 
+    We simply return the 'children' (e.g., the Dashboard) and let them in.
   */
   console.log("✅ AuthGuard: User authenticated, showing content");
   return children;
 }
 
-
-// =============================================================================
-// STYLES
-// =============================================================================
-
-/*
-  Inline styles object
-  
-  ROLE: Defines the CSS styles for our loading state
-  WHY:  Simple approach for small components (no external CSS needed)
-  HOW:  We pass these to the "style" prop of elements
-*/
-const styles = {
-  loadingContainer: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100vh",       // Full viewport height
-    backgroundColor: "#f3f4f6"
-  },
-  loadingText: {
-    fontSize: "1.25rem",
-    color: "#374151"
-  }
-};
-
-
-// =============================================================================
-// EXPORT
-// =============================================================================
-
-/*
-  Default export
-  
-  USAGE:
-    import AuthGuard from './components/shared/AuthGuard';
-    
-    // In your routing:
-    <AuthGuard>
-      <ProtectedPage />
-    </AuthGuard>
-*/
 export default AuthGuard;

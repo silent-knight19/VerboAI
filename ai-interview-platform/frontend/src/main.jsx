@@ -43,20 +43,13 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 
 /*
-  './index.css' - Global CSS styles
+  './index.css' - Global CSS styles (Tailwind included)
   
-  ROLE: Applies base styles to the entire app
-  WHY:  Some styles should apply everywhere (fonts, reset, etc.)
-  HOW:  Importing a CSS file in React adds it to the page
-  
-  NOTE: This file exists in the same folder (src/)
-        It might include things like:
-        - CSS reset/normalize
-        - Global font settings
-        - Body background color
+  ROLE: Applies base styles and Tailwind utility classes app-wide.
+  WHY:  Required for Tailwind CSS to function and for global font/layout settings.
+  HOW:  Importing here makes it available to the entire component tree.
 */
 import './index.css';
-
 /*
   App - Our main application component
   
