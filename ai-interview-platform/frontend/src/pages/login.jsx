@@ -157,8 +157,8 @@ function LoginPage() {
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-zinc-800/20 via-black to-black"></div>
         
         <div className="relative z-10 flex flex-col items-center gap-6">
-          <div className="w-16 h-16 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center animate-pulse shadow-2xl">
-               <span className="text-white font-bold text-2xl">V</span>
+          <div className="w-16 h-16 rounded-2xl bg-zinc-900 border border-zinc-800 flex items-center justify-center animate-pulse shadow-2xl overflow-hidden">
+               <img src="/logo.png" alt="VerboAI Logo" className="w-full h-full object-contain scale-125" />
           </div>
           <p className="text-zinc-500 text-sm font-medium tracking-widest uppercase animate-pulse">Initializing Workspace</p>
         </div>
@@ -205,8 +205,8 @@ function LoginPage() {
           <div className="mb-8 relative group cursor-default">
             {/* Glow effect that increases when you hover near the logo */}
             <div className="absolute inset-0 bg-indigo-500/20 blur-xl rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-            <div className="relative w-16 h-16 bg-gradient-to-br from-zinc-800 to-black border border-white/10 rounded-2xl flex items-center justify-center shadow-lg">
-              <span className="text-2xl font-black bg-gradient-to-br from-white to-zinc-400 bg-clip-text text-transparent">V</span>
+            <div className="relative w-16 h-16 bg-gradient-to-br from-zinc-800 to-black border border-white/10 rounded-2xl flex items-center justify-center shadow-lg overflow-hidden">
+              <img src="/logo.png" alt="VerboAI Logo" className="w-full h-full object-contain scale-125" />
             </div>
           </div>
 

@@ -45,8 +45,8 @@ function DashboardPage() {
       {/* Header Area */}
       <div className="w-full max-w-4xl mb-8 flex justify-between items-center">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center shadow-lg shadow-blue-200">
-            <span className="text-white font-bold text-xl">A</span>
+          <div className="w-10 h-10 bg-zinc-900 rounded-lg flex items-center justify-center shadow-lg shadow-blue-200 overflow-hidden">
+            <img src="/logo.png" alt="VerboAI Logo" className="w-full h-full object-contain scale-125" />
           </div>
           <h2 className="text-xl font-bold text-slate-800">VerboAI</h2>
         </div>
