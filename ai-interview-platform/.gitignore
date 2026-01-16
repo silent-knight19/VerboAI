@@ -60,3 +60,6 @@ service-account*.json
 *.tsbuildinfo
 .next/
 out/
+.agent/
+marketing/
+task.md
