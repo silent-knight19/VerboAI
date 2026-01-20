@@ -37,7 +37,7 @@ const { db } = require('../config/firebase.config');
 */
 const USERS_COLLECTION = 'users';
 
-
+const roles = require('../config/roles');
 // =============================================================================
 // SERVICE FUNCTIONS
 // =============================================================================
@@ -123,6 +123,7 @@ async function createUser(userData) {
     email: userData.email || null,
     displayName: userData.displayName || null,
     photoURL: userData.photoURL || null,
+    lastHeartbeatAt: null,
     
     // Auth Metadata
     authProvider: userData.authProvider || 'google',
@@ -133,7 +134,11 @@ async function createUser(userData) {
     
     // App-specific flags
     onboardingCompleted: false,
-    role: 'user'
+    role: roles.USER,
+    dailyTimeLimitSec: 1800, // Default 30 mins
+    dailyTimeUsedSec: 0,
+    lastResetDate: new Date().toISOString().split('T')[0], // "YYYY-MM-DD"
+    activeSessionId: null
   };
   
   try {
@@ -239,6 +244,111 @@ async function getOrCreateUser(userData) {
 }
 
 
+/*
+  [NEW] Helper: Check daily reset
+  ROLE: If it's a new day, reset the user's used time to 0.
+*/
+async function checkAndResetDailyBudget(user) {
+  const today = new Date().toISOString().split('T')[0];
+  
+  if (user.lastResetDate !== today) {
+    console.log(`📅 New day detected for ${user.uid}. Resetting budget.`);
+    // Reset usage and update date
+    await db.collection(USERS_COLLECTION).doc(user.uid).update({
+      dailyTimeUsedSec: 0,
+      lastResetDate: today
+    });
+    return true; // Budget was reset
+  }
+  return false;
+}
+
+/*
+  [NEW] startInterviewSession(uid)
+  ROLE: Try to start a session. Fails if budget empty or already active.
+*/
+async function startInterviewSession(uid) {
+  const user = await findUserByUid(uid);
+  if (!user) throw new Error('User not found');
+
+  // 1. Lazy Reset (Check if it's a new day)
+  await checkAndResetDailyBudget(user);
+
+  // 2. Refresh user data after potential reset
+  // In a real app, you might optimize this, but for safety we re-fetch or just proceed
+  // For simplicity, let's assume we proceed with the checked values.
+  
+  // 3. Check for Active Session (Moved to Step 5 with Zombie Logic)
+  // We don't check here anymore because we need to check if it's a zombie first.
+
+  // 4. Check Budget
+  if (user.dailyTimeUsedSec >= user.dailyTimeLimitSec) {
+    throw new Error('Daily time budget exceeded. Come back tomorrow!');
+  }
+
+  // 5. Lock the Session with Start Time
+  const now = Date.now();
+  const sessionId = `sess_${now}`;
+
+  // [NEW] Zombie Check
+  // If a session exists, check if it's dead (no heartbeat for 2 minutes)
+  if (user.activeSessionId) {
+    const lastHeartbeat = user.lastHeartbeatAt || 0; // Default to 0 if null
+    const timeSinceHeartbeat = now - lastHeartbeat;
+    const ZOMBIE_THRESHOLD_MS = 2 * 60 * 1000; // 2 minutes
+
+    if (timeSinceHeartbeat > ZOMBIE_THRESHOLD_MS) {
+      console.log(`🧟‍♂️ Zombie session detected for ${uid}. Overwriting...`);
+      // It's a zombie, so we allow proceeding (we'll overwrite it below)
+    } else {
+      // It is a valid, active session. Block the new request.
+      throw new Error('You already have an active session running.');
+    }
+  }
+  
+  await db.collection(USERS_COLLECTION).doc(uid).update({
+    lastHeartbeatAt: now,
+    activeSessionId: sessionId,
+    currentSessionStartTime: now // [SECURITY] Store start time to prevent client spoofing
+  });
+
+  return sessionId;
+}
+async function updateHeartbeat(uid) {
+   // Just update the timestamp to right now
+   await db.collection(USERS_COLLECTION).doc(uid).update({
+     lastHeartbeatAt: Date.now()
+   });
+}
+/*
+  [NEW] endInterviewSession(uid)
+  ROLE: Conclusion. Deduct time and unlock.
+  SECURITY: Calculates duration server-side to prevent tampering.
+*/
+async function endInterviewSession(uid) {
+  const user = await findUserByUid(uid);
+  
+  if (!user.activeSessionId || !user.currentSessionStartTime) {
+    console.warn(`⚠️ Security warning: User ${uid} tried to end invalid session`);
+    return;
+  }
+
+  // Calculate actual duration
+  const now = Date.now();
+  const durationMs = now - user.currentSessionStartTime;
+  const durationSec = Math.ceil(durationMs / 1000); // Round up to nearest second
+
+  // Update time used and unlock (clear activeSessionId)
+  const admin = require('firebase-admin'); 
+  
+  await db.collection(USERS_COLLECTION).doc(uid).update({
+    dailyTimeUsedSec: admin.firestore.FieldValue.increment(durationSec),
+    activeSessionId: null,
+    currentSessionStartTime: null // Clear start time
+  });
+  
+  console.log(`✅ Session ended for ${uid}. Used ${durationSec}s.`);
+}
 // =============================================================================
 // EXPORTS
 // =============================================================================
@@ -254,5 +364,9 @@ module.exports = {
   findUserByUid,
   createUser,
   updateLastLogin,
-  getOrCreateUser
+  getOrCreateUser,
+  startInterviewSession,
+  endInterviewSession,
+  checkAndResetDailyBudget,
+  updateHeartbeat
 };

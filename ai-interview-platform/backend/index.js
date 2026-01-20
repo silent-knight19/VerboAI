@@ -333,6 +333,46 @@ app.get('/api/me', verifyFirebaseToken, async function (req, res) {
     });
   }
 });
+// Correct Import (CommonJS)
+// We don't import individual functions here because we attached them to UserService object
+// const UserService = require('./src/services/user.service'); // Already imported at line 96
+
+/*
+  session routes - POST /api/session/...
+  
+  ROLE: Manage the interview session lifecycle (Start, Beat, End)
+*/
+
+// 1. START SESSION
+app.post('/api/session/start', verifyFirebaseToken, async function (req, res) {
+  try {
+    const sessionId = await UserService.startInterviewSession(req.user.uid);
+    res.json({ success: true, sessionId });
+  } catch (error) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+// 2. HEARTBEAT (The Pulse)
+app.post('/api/session/heartbeat', verifyFirebaseToken, async function (req, res) {
+  try {
+    await UserService.updateHeartbeat(req.user.uid);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+// 3. END SESSION
+app.post('/api/session/end', verifyFirebaseToken, async function (req, res) {
+  try {
+    // Note: We don't need duration from client anymore (Security Fix)
+    await UserService.endInterviewSession(req.user.uid);
+    res.json({ success: true });
+  } catch (error) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
 
 
 // =============================================================================
