@@ -1,36 +1,38 @@
 /*
 ================================================================================
-TTS SERVICE (The Mouth)
+TTS SERVICE (The Mouth - Edge TTS Edition)
 ================================================================================
 ROLE: The Speaker 🗣️
 
 WHY:
-  - We convert the AI's text response into audio.
-  - BUT Audio generation is EXPENSIVE (cost per character).
-  - AND we need to ensure the audio format is always playable by the frontend.
+  - We need to convert the AI's text response into audio.
+  - We chose Microsoft Edge TTS because it sounds like a real human (Neural).
+  - AND it's completely FREE (no API key required).
 
 HOW:
-  - We receive text from the LLM.
-  - We "Sanitize" it:
-    1. Truncate if too long (Safety Valve).
-    2. Remove markdown/emojis (optional, but good for cleanliness).
-  - We send to OpenAI TTS API.
-  - We return a standard MP3 buffer.
+  - We use the `edge-tts-universal` npm package.
+  - This package connects to Microsoft's edge read-aloud service.
+  - We request a specific voice (e.g., "en-US-AriaNeural").
+  - We get back an MP3 buffer.
 
-SAFEGUARDS IMPLEMENTED:
-  1. MAX CHARACTER LIMIT (Money Guard).
-  2. FORMAT STANDARDIZATION (Compatibility Guard).
+SAFEGUARDS:
+  1. MAX CHARACTER LIMIT (to prevent giant audio files).
+  2. STANDARDIZED VOICE (to ensure consistent accent).
 ================================================================================
 */
 
-const OpenAI = require('openai');
+const { EdgeTTSClient, OUTPUT_FORMAT } = require('edge-tts-universal');
 const AI_CONFIG = require('../../config/ai.config');
+
+// ===========================================================================
+// CONFIGURATION (Read from centralized ai.config.js)
+// ===========================================================================
+const VOICE_NAME = AI_CONFIG.TTS.VOICE_NAME;
+const MAX_CHARACTERS = AI_CONFIG.TTS.MAX_CHARACTERS;
 
 class TTSService {
   constructor() {
-    this.openai = new OpenAI({
-      apiKey: process.env.OPENAI_API_KEY || 'mock-key',
-    });
+    console.log(`🗣️ EdgeTTS: Service initialized with voice: ${VOICE_NAME}`);
   }
 
   // ===========================================================================
@@ -45,55 +47,57 @@ class TTSService {
     RETURNS: Buffer (MP3 audio data)
   */
   async generateAudio(text) {
-    console.log(`🗣️ TTS: Request received. Text length: ${text.length}`);
+    console.log(`🗣️ EdgeTTS: Request received. Text length: ${text.length}`);
 
     // -------------------------------------------------------------------------
     // SAFEGUARD 1: INPUT SANITIZATION & TRUNCATION
     // -------------------------------------------------------------------------
     let cleanText = text || '';
     
-    // Check Hard Limit
-    if (cleanText.length > AI_CONFIG.TTS.MAX_CHARACTERS) {
-      console.warn(`✂️ TTS: Text too long (${cleanText.length} chars). Truncating.`);
+    if (cleanText.length > MAX_CHARACTERS) {
+      console.warn(`✂️ EdgeTTS: Text too long (${cleanText.length} chars). Truncating.`);
       
       // Cut it off at the limit
-      cleanText = cleanText.substring(0, AI_CONFIG.TTS.MAX_CHARACTERS);
+      cleanText = cleanText.substring(0, MAX_CHARACTERS);
       
-      // Try to end on a full sentence if possible (simple heuristic)
+      // Try to end on a full sentence if possible
       const lastDot = cleanText.lastIndexOf('.');
       if (lastDot > 0) {
         cleanText = cleanText.substring(0, lastDot + 1);
       } else {
-        // If no dot, just append ...
         cleanText += '...';
       }
     }
 
     try {
       // -----------------------------------------------------------------------
-      // SAFEGUARD 2: STANDARDIZED API CALL
+      // EDGE TTS GENERATION
       // -----------------------------------------------------------------------
-      // We force specific format rules here, regardless of what input was requested.
-      const mp3 = await this.openai.audio.speech.create({
-        model: 'tts-1', // Standard model (cheaper/faster than tts-1-hd)
-        voice: AI_CONFIG.TTS.VOICE_ID,
-        input: cleanText,
-        speed: AI_CONFIG.TTS.SPEED,
-        response_format: 'mp3', // ALways MP3
-      });
-
-      console.log('🗣️ TTS: Audio generated successfully.');
+      const tts = new EdgeTTSClient();
       
-      // Convert standard response to Buffer
-      const buffer = Buffer.from(await mp3.arrayBuffer());
-      return buffer;
+      // Connect to the Edge TTS service
+      await tts.setMetadata(VOICE_NAME, OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3);
+
+      // Collect all audio chunks into a buffer
+      const audioChunks = [];
+      
+      const stream = tts.toStream(cleanText);
+      
+      for await (const chunk of stream) {
+        // Each chunk has { type: 'audio' | 'metadata', data: Buffer }
+        if (chunk.type === 'audio') {
+          audioChunks.push(chunk.data);
+        }
+      }
+
+      // Combine all chunks into a single Buffer
+      const audioBuffer = Buffer.concat(audioChunks);
+      
+      console.log(`🗣️ EdgeTTS: Audio generated successfully. Size: ${audioBuffer.length} bytes.`);
+      return audioBuffer;
 
     } catch (error) {
-      console.error('❌ TTS: Generation failed:', error.message);
-      
-      // FAIL SAFE
-      // If output fails, we might return null or a specific error code
-      // The socket handler will see this and skip playing audio.
+      console.error('❌ EdgeTTS: Generation failed:', error.message);
       throw new Error('TTS Service Failed');
     }
   }

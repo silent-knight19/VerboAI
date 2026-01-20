@@ -24,9 +24,22 @@ RULES COVERED:
 const AI_CONFIG = {
   
   // ===========================================================================
-  // 1. SPEECH-TO-TEXT (STT) SAFEGUARDS
+  // 1. SPEECH-TO-TEXT (STT) CONFIGURATION - DEEPGRAM
   // ===========================================================================
   STT: {
+    /*
+      DEEPGRAM_MODEL:
+      The transcription model to use.
+      'nova-2' is Deepgram's fastest, most accurate model.
+    */
+    DEEPGRAM_MODEL: 'nova-2',
+    
+    /*
+      DEEPGRAM_LANGUAGE:
+      Primary language for transcription.
+    */
+    DEEPGRAM_LANGUAGE: 'en-IN',
+
     /*
       SILENCE_TIMEOUT_MS: 
       If the user connects but says NOTHING for this long, we verify they are there.
@@ -38,7 +51,6 @@ const AI_CONFIG = {
       MAX_CONTINUOUS_SPEECH_MS:
       If a user talks non-stop for this long without pausing, we cut them off.
       Prevents "filibustering" (talking forever to waste AI processing time).
-      Also keeps the conversation turn-based.
     */
     MAX_CONTINUOUS_SPEECH_MS: 60 * 1000, // 1 Minute
   },
@@ -84,28 +96,27 @@ const AI_CONFIG = {
   },
 
   // ===========================================================================
-  // 3. TEXT-TO-SPEECH (TTS) SAFEGUARDS
+  // 3. TEXT-TO-SPEECH (TTS) CONFIGURATION
   // ===========================================================================
   TTS: {
     /*
-      MAX_CHARACTERS:
-      The absolute maximum text length we will try to speak.
-      If the LLM ignores our token limit and writes a book, this is the failsafe.
-      We will truncate text beyond this to save money.
+      VOICE_NAME:
+      Microsoft Edge Neural voice to use.
+      'en-IN-NeerjaNeural' is a professional Indian English female voice.
+      
+      Other options:
+        - 'en-US-AriaNeural' (Female, US)
+        - 'en-US-AndrewNeural' (Male, US)
+        - 'en-US-JennyNeural' (Female, friendly)
     */
-    MAX_CHARACTERS: 500,
-
-    /*
-      VOICE_ID:
-      The specific voice personality to use.
-    */
-    VOICE_ID: 'alloy', // OpenAI standard voice
+    VOICE_NAME: 'en-IN-NeerjaNeural',
     
     /*
-      SPEED:
-      Rate of speech. 1.0 is normal.
+      MAX_CHARACTERS:
+      Fail-safe truncation for TTS input.
+      Even though LLM is limited to ~150 tokens, this catches edge cases.
     */
-    SPEED: 1.0,
+    MAX_CHARACTERS: 500,
   },
 
   // ===========================================================================

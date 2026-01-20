@@ -52,7 +52,21 @@ module.exports = (io, socket) => {
   socket.on('interview:start', () => {
     console.log(`🎤 Interview: Starting for ${uid}`);
     state = 'LISTENING';
-    STTService.startStream(uid);
+    
+    // Start Deepgram stream with a callback for when transcripts arrive
+    STTService.startStream(uid, async (transcript) => {
+      // This callback is called by Deepgram when a final transcript is ready
+      if (state === 'LISTENING' && transcript.trim()) {
+        // Apply same truncation as audio:end for consistency
+        let safeTranscript = transcript;
+        if (safeTranscript.length > MAX_TRANSCRIPT_LENGTH) {
+          console.warn(`🛑 Interview: Deepgram transcript too long. Truncating.`);
+          safeTranscript = safeTranscript.substring(0, MAX_TRANSCRIPT_LENGTH) + '...';
+        }
+        await handleUserTurnComplete(safeTranscript);
+      }
+    });
+    
     socket.emit('interview:status', { state: 'LISTENING', message: 'I am listening...' });
   });
 
@@ -64,8 +78,6 @@ module.exports = (io, socket) => {
     // -------------------------------------------------------------------------
     // SAFEGUARD: STATE CHECK
     // -------------------------------------------------------------------------
-    // If AI is thinking or speaking, ignore the user (for now).
-    // In a future advanced version, this could trigger an "Interrupt".
     if (state !== 'LISTENING') return;
 
     // -------------------------------------------------------------------------
@@ -73,10 +85,10 @@ module.exports = (io, socket) => {
     // -------------------------------------------------------------------------
     if (audioData && audioData.length > MAX_AUDIO_CHUNK_SIZE) {
       console.warn(`🛑 Interview: Audio chunk too large from ${uid}. Ignoring.`);
-      return; // Silently ignore oversized chunks.
+      return;
     }
 
-    // 1. Process with STT Safeguards
+    // Send audio to Deepgram for processing
     const sttResult = STTService.processAudio(uid, audioData);
 
     if (sttResult === 'SILENCE_TIMEOUT') {
@@ -86,15 +98,14 @@ module.exports = (io, socket) => {
     }
     
     if (sttResult === 'MAX_DURATION_EXCEEDED') {
-      // Force end of turn
       console.log(`⚠️ Interview: User filibustering. Forcing turn end.`);
-      handleUserTurnComplete("...[User cut off due to time limit]...");
+      // Deepgram will have already received partial audio, just reset
+      state = 'IDLE';
+      socket.emit('error', { message: 'You spoke for too long. Please be more concise.' });
       return;
     }
-
-    // (Mock) If we detect "End of Sentence" silence, we trigger turn.
-    // In real app, VAD logic would call this.
-    // For now, we wait for a manual 'audio:end' event from client or silence.
+    
+    // Deepgram handles transcription and calls the callback we passed in interview:start
   });
 
 
@@ -138,22 +149,21 @@ module.exports = (io, socket) => {
 
       // C. SWITCH STATE -> SPEAKING
       state = 'SPEAKING';
-      socket.emit('interview:status', { state: 'SPEAKING', message: ' responding...' });
+      socket.emit('interview:status', { state: 'SPEAKING', message: 'Responding...' });
 
-      // D. CALL TTS (The Mouth)
+      // D. GENERATE AUDIO (Edge TTS - Free, Human-like voice)
       const audioBuffer = await TTSService.generateAudio(aiResponseText);
 
-      // E. SEND RESULT TO CLIENT
+      // E. SEND RESULT TO CLIENT (Text + Audio)
       socket.emit('audio:response', {
         text: aiResponseText,
         audio: audioBuffer
       });
       
-      // F. RESET TO LISTENING (After audio plays)
-      // In a real app, client sends 'playback:complete' event.
-      // Here we allow immediate interruption or wait for client.
+      // F. RESET TO LISTENING
+      // In a more advanced version, we'd wait for 'playback:complete' from client.
       state = 'LISTENING';
-      socket.emit('interview:status', { state: 'LISTENING', message: 'your turn...' });
+      socket.emit('interview:status', { state: 'LISTENING', message: 'Your turn...' });
 
     } catch (error) {
       console.error('❌ Interview Loop Failed:', error);

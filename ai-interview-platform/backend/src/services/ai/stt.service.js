@@ -1,48 +1,118 @@
 /*
 ================================================================================
-STT SERVICE (Speech-to-Text) with SAFEGUARDS
+STT SERVICE (Speech-to-Text) - DEEPGRAM EDITION
 ================================================================================
 ROLE: The Ear 👂
 
 WHY:
-  - We listen to audio streams from the user.
-  - BUT we must protect the system from:
-    1. Silence: User walks away (AFK).
-    2. Filibustering: User talks for 10 minutes straight.
-    3. Noise: Background noise wasting our processing time.
+  - We need to convert real-time audio into text.
+  - Deepgram is the industry leader for fast, accurate STT.
+  - Their 'nova-2' model is blazing fast and works great with accents.
 
 HOW:
-  - We process audio in "chunks".
-  - We track:
-    - `lastVoiceTime`: When did we last hear a human?
-    - `continuousSpeechStart`: When did they START talking non-stop?
-  - If safeguards trigger, we force a "Turn End" event.
+  - We use the @deepgram/sdk npm package.
+  - For each user, we maintain a persistent WebSocket connection.
+  - Audio chunks are streamed to Deepgram, and transcripts stream back.
 
-SAFEGUARDS IMPLEMENTED:
-  1. SILENCE TIMEOUT (from AI_CONFIG)
-  2. MAX DURATION (from AI_CONFIG)
+SAFEGUARDS:
+  1. SILENCE TIMEOUT (user went AFK).
+  2. MAX DURATION (user filibustering).
 ================================================================================
 */
 
+const { createClient, LiveTranscriptionEvents } = require('@deepgram/sdk');
 const AI_CONFIG = require('../../config/ai.config');
 
 class STTService {
   constructor() {
-    // Track conversation state per user
-    // Key: userId, Value: { lastVoiceTime, continuousSpeechStart, isSpeaking }
+    // Initialize Deepgram client with API key from environment
+    this.deepgram = createClient(process.env.DEEPGRAM_API_KEY);
+    
+    // Track active streams per user
+    // Key: userId, Value: { connection, lastVoiceTime, continuousSpeechStart, onTranscript }
     this.streams = new Map();
+    
+    console.log('👂 Deepgram STT: Service initialized.');
   }
 
   // ===========================================================================
-  // 1. INITIALIZE STREAM
+  // 1. START STREAM
   // ===========================================================================
-  startStream(userId) {
-    console.log(`👂 STT: Starting stream for ${userId}`);
-    this.streams.set(userId, {
+  /*
+    startStream(userId, onTranscript)
+    
+    PARAMS:
+      - userId: String (unique identifier for the user)
+      - onTranscript: Function (callback when transcript is ready)
+    
+    Creates a live WebSocket connection to Deepgram for this user.
+  */
+  startStream(userId, onTranscript) {
+    console.log(`👂 Deepgram STT: Starting stream for ${userId}`);
+    
+    // Create live transcription connection
+    const connection = this.deepgram.listen.live({
+      model: AI_CONFIG.STT.DEEPGRAM_MODEL,
+      language: AI_CONFIG.STT.DEEPGRAM_LANGUAGE,
+      smart_format: true,      // Auto-punctuation
+      interim_results: true,   // Get results as user speaks
+      endpointing: 300,        // 300ms silence = end of utterance
+    });
+
+    // Store stream state
+    const streamState = {
+      connection,
       lastVoiceTime: Date.now(),
       continuousSpeechStart: null,
       isSpeaking: false,
-      buffer: [] // To store audio chunks if we were doing real processing
+      onTranscript: onTranscript || (() => {}),
+    };
+    this.streams.set(userId, streamState);
+
+    // -------------------------------------------------------------------------
+    // EVENT: Transcript Received
+    // -------------------------------------------------------------------------
+    connection.on(LiveTranscriptionEvents.Transcript, (data) => {
+      const transcript = data.channel.alternatives[0]?.transcript || '';
+      const isFinal = data.is_final;
+      
+      if (transcript.trim()) {
+        console.log(`👂 STT [${userId}]: ${isFinal ? '✅' : '⏳'} "${transcript}"`);
+        
+        // Update voice activity time
+        streamState.lastVoiceTime = Date.now();
+        streamState.isSpeaking = true;
+        if (!streamState.continuousSpeechStart) {
+          streamState.continuousSpeechStart = Date.now();
+        }
+        
+        // If this is a final transcript, call the callback
+        if (isFinal) {
+          streamState.onTranscript(transcript);
+        }
+      }
+    });
+
+    // -------------------------------------------------------------------------
+    // EVENT: Connection Opened
+    // -------------------------------------------------------------------------
+    connection.on(LiveTranscriptionEvents.Open, () => {
+      console.log(`👂 Deepgram STT: Connection opened for ${userId}`);
+    });
+
+    // -------------------------------------------------------------------------
+    // EVENT: Connection Closed
+    // -------------------------------------------------------------------------
+    connection.on(LiveTranscriptionEvents.Close, () => {
+      console.log(`👂 Deepgram STT: Connection closed for ${userId}`);
+      this.streams.delete(userId);
+    });
+
+    // -------------------------------------------------------------------------
+    // EVENT: Error
+    // -------------------------------------------------------------------------
+    connection.on(LiveTranscriptionEvents.Error, (error) => {
+      console.error(`❌ Deepgram STT [${userId}]: Error -`, error.message);
     });
   }
 
@@ -52,7 +122,7 @@ class STTService {
   /*
     processAudio(userId, audioChunk)
     
-    ROLE: Analyze incoming audio.
+    ROLE: Send audio data to Deepgram and check safeguards.
     RETURNS: 
       - 'CONTINUE': Keep listening.
       - 'SILENCE_TIMEOUT': User has been silent too long.
@@ -63,31 +133,14 @@ class STTService {
     if (!stream) return 'ERROR_NO_STREAM';
 
     const now = Date.now();
-    
-    // -------------------------------------------------------------------------
-    // A. DETECT VOICE ACTIVITY (VAD)
-    // -------------------------------------------------------------------------
-    // In a real implementation, we'd use a VAD library (like rtc-vad or silero).
-    // For this mock, we assume ALL incoming audio is "voice" for safety,
-    // unless the chunk size is tiny (silence mostly).
-    const isVoice = audioChunk.length > 100; // Simplified VAD
-    
-    if (isVoice) {
-      stream.lastVoiceTime = now;
-      
-      if (!stream.isSpeaking) {
-        // They just started talking
-        stream.isSpeaking = true;
-        stream.continuousSpeechStart = now;
-      }
-    } else {
-      // Silence
-      stream.isSpeaking = false;
-      stream.continuousSpeechStart = null;
+
+    // Send audio to Deepgram
+    if (stream.connection && audioChunk) {
+      stream.connection.send(audioChunk);
     }
 
     // -------------------------------------------------------------------------
-    // B. SAFEGUARD: MAX CONTINUOUS SPEECH (Filibuster Protection)
+    // SAFEGUARD A: MAX CONTINUOUS SPEECH (Filibuster Protection)
     // -------------------------------------------------------------------------
     if (stream.isSpeaking && stream.continuousSpeechStart) {
       const duration = now - stream.continuousSpeechStart;
@@ -99,9 +152,8 @@ class STTService {
     }
 
     // -------------------------------------------------------------------------
-    // C. SAFEGUARD: SILENCE DETECTION (AFK Check)
+    // SAFEGUARD B: SILENCE DETECTION (AFK Check)
     // -------------------------------------------------------------------------
-    // If they haven't spoken in X seconds, are they still there?
     const timeSinceVoice = now - stream.lastVoiceTime;
     
     if (timeSinceVoice > AI_CONFIG.STT.SILENCE_TIMEOUT_MS) {
@@ -113,11 +165,15 @@ class STTService {
   }
 
   // ===========================================================================
-  // 3. CLEANUP
+  // 3. END STREAM
   // ===========================================================================
   endStream(userId) {
+    const stream = this.streams.get(userId);
+    if (stream && stream.connection) {
+      stream.connection.finish();
+    }
     this.streams.delete(userId);
-    console.log(`👂 STT: Ended stream for ${userId}`);
+    console.log(`👂 Deepgram STT: Ended stream for ${userId}`);
   }
 }
 
