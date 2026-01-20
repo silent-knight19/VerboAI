@@ -52,6 +52,7 @@ const socketAuth = require('./middleware/socketAuth');
   ROLE: Defines what happens on 'session:start', 'session:end', etc.
 */
 const sessionHandler = require('./handlers/session.handler');
+const interviewHandler = require('./handlers/interview.handler');
 
 
 // =============================================================================
@@ -161,6 +162,7 @@ function initializeSocket(httpServer) {
     
     // Register the session event handlers (start, heartbeat, end, disconnect).
     sessionHandler(io, socket);
+    interviewHandler(io, socket);
     
     // You can add more handlers here in the future.
     // For example: chatHandler(io, socket), adminHandler(io, socket), etc.
