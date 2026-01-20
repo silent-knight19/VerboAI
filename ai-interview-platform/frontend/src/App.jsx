@@ -38,6 +38,7 @@ import useAuthListener from "./hooks/useAuthListener";
 import LoginPage from "./pages/login";
 import DashboardPage from "./pages/dashboard";
 import AuthGuard from "./components/shared/AuthGuard";
+import InterviewPage from "./pages/InterviewPage";
 
 
 // =============================================================================
@@ -85,6 +86,20 @@ function App() {
           element={
             <AuthGuard>
               <DashboardPage />
+            </AuthGuard>
+          } 
+        />
+
+        {/* 
+          ROUTE: Interview Page (Protected)
+          URL: /interview
+          COMPONENT: <InterviewPage /> wrapped in <AuthGuard>
+        */}
+        <Route 
+          path="/interview" 
+          element={
+            <AuthGuard>
+              <InterviewPage />
             </AuthGuard>
           } 
         />

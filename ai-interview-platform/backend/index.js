@@ -45,6 +45,8 @@ Our frontend sends requests to this backend, and the backend responds with data.
   HOW:  We create an "app" and define routes on it
 */
 const express = require('express');
+const http = require('http'); // [NEW] Needed for Socket.io
+const { initializeSocket } = require('./src/socket/socket.server'); // [NEW] Our Socket Module
 
 /*
   cors - Cross-Origin Resource Sharing middleware
@@ -125,6 +127,7 @@ dotenv.config();
   HOW:  Returns an "app" object with methods like .get(), .post(), .use(), etc.
 */
 const app = express();
+const server = http.createServer(app); // [NEW] Wrap Express in HTTP Server
 
 /*
   process.env.PORT || 3000
@@ -395,13 +398,19 @@ app.post('/api/session/end', verifyFirebaseToken, async function (req, res) {
   - The port is the specific "door" to your application
   - Only one application can use a port at a time
 */
-app.listen(PORT, function () {
+// START THE SERVER (Modified for Socket.io)
+// We listen on 'server', not 'app'
+server.listen(PORT, function () {
   
   // This callback runs when the server starts successfully
   console.log('=================================');
   console.log('AI Interview Platform Backend');
   console.log('=================================');
   console.log('Server is running on port ' + PORT);
+  
+  // Initialize Socket.io (After server is created)
+  initializeSocket(server);
+  
   console.log('Visit: http://localhost:' + PORT);
   console.log('=================================');
   

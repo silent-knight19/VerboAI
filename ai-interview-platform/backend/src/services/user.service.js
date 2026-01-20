@@ -268,56 +268,77 @@ async function checkAndResetDailyBudget(user) {
   ROLE: Try to start a session. Fails if budget empty or already active.
 */
 async function startInterviewSession(uid) {
-  const user = await findUserByUid(uid);
-  if (!user) throw new Error('User not found');
+  // [SECURITY] Transaction to prevent race conditions (Concurrent Socket Exploit)
+  return await db.runTransaction(async (transaction) => {
+    
+    // 1. Get User (Transactional Read)
+    const userRef = db.collection(USERS_COLLECTION).doc(uid);
+    const userDoc = await transaction.get(userRef);
+    
+    if (!userDoc.exists) throw new Error('User not found');
+    const user = userDoc.data();
 
-  // 1. Lazy Reset (Check if it's a new day)
-  await checkAndResetDailyBudget(user);
-
-  // 2. Refresh user data after potential reset
-  // In a real app, you might optimize this, but for safety we re-fetch or just proceed
-  // For simplicity, let's assume we proceed with the checked values.
-  
-  // 3. Check for Active Session (Moved to Step 5 with Zombie Logic)
-  // We don't check here anymore because we need to check if it's a zombie first.
-
-  // 4. Check Budget
-  if (user.dailyTimeUsedSec >= user.dailyTimeLimitSec) {
-    throw new Error('Daily time budget exceeded. Come back tomorrow!');
-  }
-
-  // 5. Lock the Session with Start Time
-  const now = Date.now();
-  const sessionId = `sess_${now}`;
-
-  // [NEW] Zombie Check
-  // If a session exists, check if it's dead (no heartbeat for 2 minutes)
-  if (user.activeSessionId) {
-    const lastHeartbeat = user.lastHeartbeatAt || 0; // Default to 0 if null
-    const timeSinceHeartbeat = now - lastHeartbeat;
-    const ZOMBIE_THRESHOLD_MS = 2 * 60 * 1000; // 2 minutes
-
-    if (timeSinceHeartbeat > ZOMBIE_THRESHOLD_MS) {
-      console.log(`🧟‍♂️ Zombie session detected for ${uid}. Overwriting...`);
-      // It's a zombie, so we allow proceeding (we'll overwrite it below)
-    } else {
-      // It is a valid, active session. Block the new request.
-      throw new Error('You already have an active session running.');
+    // 2. Lazy Reset Logic (In-Memory check)
+    // Note: In transaction, if we need to write, we must do it as part of this transaction
+    const today = new Date().toISOString().split('T')[0];
+    let currentDailyUsed = user.dailyTimeUsedSec || 0;
+    
+    if (user.lastResetDate !== today) {
+        // It's a new day, so effectively usage is 0
+         currentDailyUsed = 0;
+         transaction.update(userRef, {
+             dailyTimeUsedSec: 0,
+             lastResetDate: today
+         });
     }
-  }
-  
-  await db.collection(USERS_COLLECTION).doc(uid).update({
-    lastHeartbeatAt: now,
-    activeSessionId: sessionId,
-    currentSessionStartTime: now // [SECURITY] Store start time to prevent client spoofing
-  });
 
-  return sessionId;
+    // 3. Check Budget
+    if (currentDailyUsed >= (user.dailyTimeLimitSec || 1800)) {
+        throw new Error('Daily time budget exceeded. Come back tomorrow!');
+    }
+
+    // 4. Zombie Check & Active Session
+    const now = Date.now();
+    if (user.activeSessionId) {
+        const lastHeartbeat = user.lastHeartbeatAt || 0;
+        const ZOMBIE_THRESHOLD_MS = 2 * 60 * 1000; 
+
+        if (now - lastHeartbeat <= ZOMBIE_THRESHOLD_MS) {
+            throw new Error('You already have an active session running.');
+        } 
+        // Else: It is a zombie, we proceed to overwrite it
+        console.log(`🧟‍♂️ Transaction: overwriting zombie session for ${uid}`);
+    }
+
+    // 5. Lock Session
+    const sessionId = `sess_${now}`;
+    transaction.update(userRef, {
+        lastHeartbeatAt: now,
+        activeSessionId: sessionId,
+        currentSessionStartTime: now
+    });
+
+    return sessionId;
+  });
 }
 async function updateHeartbeat(uid) {
-   // Just update the timestamp to right now
+   const MAX_DURATION_MS = 60 * 60 * 1000; // 1 Hour Hard Limit
+   
+   // 1. Get current session start time
+   const user = await findUserByUid(uid);
+   if (!user || !user.activeSessionId) return;
+
+   // 2. Check total duration
+   const now = Date.now();
+   if (user.currentSessionStartTime && (now - user.currentSessionStartTime > MAX_DURATION_MS)) {
+       console.error(`🚨 Security: Session for ${uid} exceeded hard limit. Force closing.`);
+       await endInterviewSession(uid);
+       throw new Error('Session exceeded maximum duration');
+   }
+
+   // 3. Update heartbeat
    await db.collection(USERS_COLLECTION).doc(uid).update({
-     lastHeartbeatAt: Date.now()
+     lastHeartbeatAt: now
    });
 }
 /*
