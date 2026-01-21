@@ -266,6 +266,8 @@ async function checkAndResetDailyBudget(user) {
 /*
   [NEW] startInterviewSession(uid)
   ROLE: Try to start a session. Fails if budget empty or already active.
+  
+  UPDATED: Now handles page refresh gracefully by force-ending the previous session.
 */
 async function startInterviewSession(uid) {
   // [SECURITY] Transaction to prevent race conditions (Concurrent Socket Exploit)
@@ -297,20 +299,39 @@ async function startInterviewSession(uid) {
         throw new Error('Daily time budget exceeded. Come back tomorrow!');
     }
 
-    // 4. Zombie Check & Active Session
+    // 4. Handle Existing Session (Force Resume / Force Close)
+    // ----------------------------------------------------------
+    // DESIGN DECISION:
+    //   Instead of blocking the user with "active session" error (frustrating on page refresh),
+    //   we calculate how much time they USED in the old session, deduct it, and start fresh.
+    //   This is more user-friendly but prevents "free time" exploits.
+    // ----------------------------------------------------------
     const now = Date.now();
     if (user.activeSessionId) {
-        const lastHeartbeat = user.lastHeartbeatAt || 0;
-        const ZOMBIE_THRESHOLD_MS = 2 * 60 * 1000; 
-
-        if (now - lastHeartbeat <= ZOMBIE_THRESHOLD_MS) {
-            throw new Error('You already have an active session running.');
-        } 
-        // Else: It is a zombie, we proceed to overwrite it
-        console.log(`🧟‍♂️ Transaction: overwriting zombie session for ${uid}`);
+        const sessionStart = user.currentSessionStartTime || now;
+        const elapsedSeconds = Math.floor((now - sessionStart) / 1000);
+        
+        console.log(`⚠️ Force-ending previous session for ${uid}. Elapsed: ${elapsedSeconds}s`);
+        
+        // Deduct the time from the old session (prevent exploit)
+        const newDailyUsed = Math.min(
+          currentDailyUsed + elapsedSeconds,
+          user.dailyTimeLimitSec || 1800 // Cap at max to be safe
+        );
+        
+        // Update the daily used time immediately
+        currentDailyUsed = newDailyUsed;
+        transaction.update(userRef, {
+            dailyTimeUsedSec: newDailyUsed
+        });
+        
+        // Re-check budget after deducting old session time
+        if (currentDailyUsed >= (user.dailyTimeLimitSec || 1800)) {
+            throw new Error('Daily time budget exceeded. Come back tomorrow!');
+        }
     }
 
-    // 5. Lock Session
+    // 5. Lock Session (Start New)
     const sessionId = `sess_${now}`;
     transaction.update(userRef, {
         lastHeartbeatAt: now,

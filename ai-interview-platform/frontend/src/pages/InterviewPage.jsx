@@ -28,7 +28,9 @@ const InterviewPage = () => {
     startRecording, 
     stopRecording,
     chatHistory, // Full history for chat UI
-    isTerminated // NEW: Track termination
+    isTerminated, // NEW: Track termination
+    warning,     // NEW: Warning state
+    setWarning   // NEW: Warning setter
   } = useAudioRecorder();
 
   const [status, setStatus] = useState('disconnected');
@@ -88,6 +90,26 @@ const InterviewPage = () => {
 
   const handleStartSession = async () => {
     try {
+      // -------------------------------------------------------
+      // ANTI-CHEAT: FORCE FULLSCREEN
+      // -------------------------------------------------------
+      try {
+        if (document.documentElement.requestFullscreen) {
+          await document.documentElement.requestFullscreen();
+        } else if (document.documentElement.mozRequestFullScreen) { // Firefox
+          await document.documentElement.mozRequestFullScreen();
+        } else if (document.documentElement.webkitRequestFullscreen) { // Chrome, Safari
+          await document.documentElement.webkitRequestFullscreen();
+        } else if (document.documentElement.msRequestFullscreen) { // IE/Edge
+          await document.documentElement.msRequestFullscreen();
+        }
+      } catch (fsErr) {
+        console.warn("Could not enter fullscreen:", fsErr);
+        // We proceed anyway, but the "Anti-Cheat" listener will likely complain if we enforced it strictly. 
+        // For now, we allow it but it might trigger "Exited Fullscreen" immediately if we are strict.
+        // Since useAudioRecorder checks !document.fullscreenElement, if this fails, we might get a violation.
+      }
+
       setStatus('starting');
       setError(null);
       
@@ -119,6 +141,13 @@ const InterviewPage = () => {
     if (heartbeatIntervalRef.current) clearInterval(heartbeatIntervalRef.current);
     if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
 
+    // EXIT FULLSCREEN
+    try {
+      if (document.exitFullscreen && document.fullscreenElement) {
+        await document.exitFullscreen();
+      }
+    } catch(e) { /* ignore */ }
+
     if (status === 'running' || status === 'starting') {
       setStatus('ending');
       try {
@@ -148,6 +177,34 @@ const InterviewPage = () => {
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 font-sans selection:bg-blue-500 selection:text-white overflow-hidden relative">
       
+       {/* ======================= OVERLAY: WARNING MODAL ======================= */}
+       {warning && !isTerminated && (
+        <div className="absolute inset-0 z-50 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center text-center p-8 animate-in fade-in zoom-in duration-300">
+          <div className="bg-slate-900 border-2 border-yellow-500 rounded-2xl p-8 max-w-md shadow-2xl shadow-yellow-500/20 transform transition-all">
+            <div className="w-16 h-16 bg-yellow-500/20 rounded-full flex items-center justify-center mx-auto mb-4 animate-bounce">
+              <span className="text-4xl">⚠️</span>
+            </div>
+            <h2 className="text-2xl font-bold text-white mb-2">SECURITY WARNING</h2>
+            <p className="text-yellow-400 mb-6 font-medium text-lg">
+              {warning}
+            </p>
+            <p className="text-slate-400 text-sm mb-6">
+              Please strictly adhere to the interview rules. Repeated violations will result in immediate termination.
+            </p>
+            <button 
+              onClick={() => {
+                 setWarning(null);
+                 // Re-request fullscreen just in case
+                 try { document.documentElement.requestFullscreen().catch(() => {}) } catch(e){}
+              }}
+              className="w-full py-3 bg-yellow-600 hover:bg-yellow-500 text-white font-bold rounded-lg transition-colors"
+            >
+              I Understand
+            </button>
+          </div>
+        </div>
+      )}
+
        {/* ======================= OVERLAY: TERMINATION LOCKDOWN ======================= */}
       {isTerminated && (
         <div className="absolute inset-0 z-50 bg-slate-950/90 backdrop-blur-md flex flex-col items-center justify-center text-center p-8 animate-fade-in">
@@ -156,7 +213,7 @@ const InterviewPage = () => {
           </div>
           <h1 className="text-4xl font-bold text-white mb-2">INTERVIEW TERMINATED</h1>
           <p className="text-xl text-red-400 max-w-lg mb-8">
-            This session has been permanently locked due to security violations (Tab Switching).
+            This session has been permanently locked due to security violations.
           </p>
           <div className="p-4 bg-red-900/20 border border-red-500/50 rounded-lg text-red-300 font-mono text-sm">
             Violation Code: INTEGRITY_CHECK_FAILED

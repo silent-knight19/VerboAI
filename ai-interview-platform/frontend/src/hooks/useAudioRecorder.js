@@ -34,6 +34,7 @@ const useAudioRecorder = () => {
   const [aiMessage, setAiMessage] = useState('Ready to start...');
   const [chatHistory, setChatHistory] = useState([]); // Array of { role: 'user'|'ai', text }
   const [isTerminated, setIsTerminated] = useState(false); // NEW: Track termination state
+  const [warning, setWarning] = useState(null); // NEW: Track warning state
 
   // ===========================================================================
   // REFS (Mutable state that doesn't trigger re-renders)
@@ -230,6 +231,10 @@ const useAudioRecorder = () => {
     // -------------------------------------------------------------------------
     SocketService.socket.on('session:warning', (data) => {
       console.warn('⚠️ Security Warning:', data.message);
+      
+      // EXPOSE TO UI (For Modal)
+      setWarning(data.message);
+      
       // Inject System Message into Chat (Red Alert)
       setChatHistory(prev => [...prev, { 
         role: 'system', 
@@ -273,29 +278,50 @@ const useAudioRecorder = () => {
   }, [playAudioResponse]);
 
   // ===========================================================================
-  // EFFECT: Anti-Cheating (Tab Switch Detection)
+  // EFFECT: Anti-Cheating (Tab Switch, Blur, Resize/Fullscreen Detection)
   // Only active when interview is actually running (isRecording)
   // ===========================================================================
   useEffect(() => {
+    if (!isRecording) return;
+    
     console.log(`👁️ Anti-Cheating: Monitor initialized (Recording: ${isRecording})`);
 
+    const reportViolation = (reason) => {
+      if (isTerminated) return; // Don't kick a dead horse
+      console.warn(`🚨 Anti-Cheat Violation detected: ${reason}`);
+      SocketService.emit('session:violation');
+    };
+
+    // 1. Tab Switching (Visibility API)
     const handleVisibilityChange = () => {
-      console.log(`👁️ Visibility Changed. Hidden: ${document.hidden}, Recording: ${isRecording}`);
-      
-      // ONLY trigger if the user is in an active session (recording audio)
-      // and checking document.hidden (user left the tab)
-      if (document.hidden && isRecording) {
-         console.warn("🫣 User switched tabs during interview! Reporting violation...");
-         SocketService.emit('session:violation');
+      if (document.hidden) {
+         reportViolation("Tab Switch / Minimized");
+      }
+    };
+
+    // 2. Window Focus (Blur = clicked outside or Alt-Tabbed)
+    const handleBlur = () => {
+      // Small grace period could be added here, but let's be strict for now
+      reportViolation("Window Lost Focus");
+    };
+
+    // 3. Fullscreen Enforcement (Optional but recommended)
+    const handleFullscreenChange = () => {
+      if (!document.fullscreenElement) {
+        reportViolation("Exited Fullscreen");
       }
     };
 
     document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("blur", handleBlur);
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
 
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("blur", handleBlur);
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
     };
-  }, [isRecording]); // Added dependency on isRecording
+  }, [isRecording, isTerminated]);
 
 
   // ===========================================================================
@@ -414,15 +440,16 @@ const useAudioRecorder = () => {
   // ===========================================================================
   return {
     isRecording,
-    isTerminated, // NEW: Export this
+    isTerminated, 
     permissionError,
     aiState,
     aiMessage,
     startRecording,
     stopRecording,
-    stopRecording,
     toggleRecording,
-    chatHistory
+    chatHistory,
+    warning,        // NEW: Export warning state
+    setWarning      // NEW: Export setter for manual dismissal
   };
 };
 
