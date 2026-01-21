@@ -159,6 +159,7 @@ function initializeSocket(httpServer) {
   */
   io.on('connection', (socket) => {
     // The user is authenticated. socket.user contains their info.
+    console.log(`🟢 SocketServer: User connected - ${socket.user.uid}`);
     
     // Register the session event handlers (start, heartbeat, end, disconnect).
     sessionHandler(io, socket);

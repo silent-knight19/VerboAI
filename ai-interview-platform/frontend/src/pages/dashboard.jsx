@@ -8,10 +8,12 @@ HOW:  It displays user info and typical dashboard actions with premium styling.
 ================================================================================
 */
 
+import { useNavigate } from 'react-router-dom';
 import useAuthStore from "../store/auth.store";
 import { AuthService } from "../services/auth.service";
 
 function DashboardPage() {
+  const navigate = useNavigate();
   
   /*
     Get user and profile from store using SEPARATE selectors
@@ -120,7 +122,10 @@ function DashboardPage() {
               <div className="md:col-span-2 space-y-4">
                 <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">Quick Actions</h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <button className="flex flex-col items-start p-4 bg-white border border-slate-200 rounded-xl hover:border-blue-500 hover:shadow-md transition-all group text-left">
+                  <button 
+                    onClick={() => navigate('/interview')}
+                    className="flex flex-col items-start p-4 bg-white border border-slate-200 rounded-xl hover:border-blue-500 hover:shadow-md transition-all group text-left"
+                  >
                     <span className="p-2 bg-blue-50 text-blue-600 rounded-lg group-hover:bg-blue-600 group-hover:text-white transition-colors mb-4">
                       <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />

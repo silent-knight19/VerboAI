@@ -62,9 +62,9 @@ const AI_CONFIG = {
     /*
       MODEL_NAME: 
       Cerebras Cloud API Model.
-      'llama3.1-70b' is their flagship fast model.
+      'gpt-oss-120b' is their most capable model.
     */
-    MODEL_NAME: 'llama3.1-70b', 
+    MODEL_NAME: 'llama-3.3-70b', 
     
     /*
       BASE_URL:
@@ -78,7 +78,7 @@ const AI_CONFIG = {
       ~150 tokens is about 1 minute of speaking time.
       Keeps answers concise and interview-like.
     */
-    MAX_TOKENS_PER_RESPONSE: 150,
+    MAX_TOKENS_PER_RESPONSE: 1000,
 
     /*
       TEMPERATURE:

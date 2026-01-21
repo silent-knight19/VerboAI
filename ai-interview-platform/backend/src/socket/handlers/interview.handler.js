@@ -75,10 +75,16 @@ module.exports = (io, socket) => {
   // EVENT: audio:chunk (User Speaking)
   // ===========================================================================
   socket.on('audio:chunk', async (audioData) => {
+    // DEBUG: Log when audio chunk is received
+    console.log(`🎤 Interview: Received audio chunk from ${uid} (${audioData?.length || 0} bytes)`);
+    
     // -------------------------------------------------------------------------
     // SAFEGUARD: STATE CHECK
     // -------------------------------------------------------------------------
-    if (state !== 'LISTENING') return;
+    if (state !== 'LISTENING') {
+      console.log(`🚫 Interview: Ignoring chunk - state is ${state}, not LISTENING`);
+      return;
+    }
 
     // -------------------------------------------------------------------------
     // SAFEGUARD: CHUNK SIZE LIMIT (Binary Blob Attack Prevention)
@@ -91,17 +97,32 @@ module.exports = (io, socket) => {
     // Send audio to Deepgram for processing
     const sttResult = STTService.processAudio(uid, audioData);
 
+    // -------------------------------------------------------------------------
+    // SILENCE TIMEOUT: Just notify, DON'T stop listening
+    // We want the interview to continue even after brief silences
+    // -------------------------------------------------------------------------
     if (sttResult === 'SILENCE_TIMEOUT') {
-      socket.emit('error', { message: 'Session paused due to silence.' });
-      state = 'IDLE';
+      console.log(`⏸️ Interview: Silence detected for ${uid}, but still listening...`);
+      // Just notify the user, don't change state - keep listening!
+      socket.emit('interview:status', { 
+        state: 'LISTENING', 
+        message: 'I am still listening... Take your time.' 
+      });
+      // Do NOT set state = 'IDLE' - that breaks the interview!
       return;
     }
     
+    // -------------------------------------------------------------------------
+    // MAX DURATION: User talked too long - just truncate, don't stop
+    // -------------------------------------------------------------------------
     if (sttResult === 'MAX_DURATION_EXCEEDED') {
-      console.log(`⚠️ Interview: User filibustering. Forcing turn end.`);
-      // Deepgram will have already received partial audio, just reset
-      state = 'IDLE';
-      socket.emit('error', { message: 'You spoke for too long. Please be more concise.' });
+      console.log(`⚠️ Interview: User filibustering. Will process what we have.`);
+      // Notify user but don't break the interview
+      socket.emit('interview:status', { 
+        state: 'LISTENING', 
+        message: 'That was a long response! Let me process what you said...' 
+      });
+      // Do NOT set state = 'IDLE' - that breaks the interview!
       return;
     }
     
@@ -155,9 +176,13 @@ module.exports = (io, socket) => {
       const audioBuffer = await TTSService.generateAudio(aiResponseText);
 
       // E. SEND RESULT TO CLIENT (Text + Audio)
+      // Convert Buffer to Base64 String to avoid Socket.io binary issues on frontend
+      const audioBase64 = audioBuffer.toString('base64');
+      console.log(`📤 Interview: Sending audio:response. Text length: ${aiResponseText.length}, Audio size: ${audioBase64.length} chars (Base64)`);
+      
       socket.emit('audio:response', {
         text: aiResponseText,
-        audio: audioBuffer
+        audio: audioBase64 
       });
       
       // F. RESET TO LISTENING

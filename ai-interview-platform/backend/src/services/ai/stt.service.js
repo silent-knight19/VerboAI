@@ -51,12 +51,15 @@ class STTService {
     console.log(`👂 Deepgram STT: Starting stream for ${userId}`);
     
     // Create live transcription connection
+    // NOTE: WebM is a container format, so Deepgram auto-detects encoding.
+    // Do NOT specify 'encoding' or 'sample_rate' for containerized audio.
     const connection = this.deepgram.listen.live({
       model: AI_CONFIG.STT.DEEPGRAM_MODEL,
       language: AI_CONFIG.STT.DEEPGRAM_LANGUAGE,
       smart_format: true,      // Auto-punctuation
       interim_results: true,   // Get results as user speaks
       endpointing: 300,        // 300ms silence = end of utterance
+      punctuate: true,         // Add punctuation
     });
 
     // Store stream state
@@ -65,6 +68,8 @@ class STTService {
       lastVoiceTime: Date.now(),
       continuousSpeechStart: null,
       isSpeaking: false,
+      isReady: false,              // Track if connection is open
+      pendingChunks: [],           // Buffer for chunks sent before connection opens
       onTranscript: onTranscript || (() => {}),
     };
     this.streams.set(userId, streamState);
@@ -98,6 +103,16 @@ class STTService {
     // -------------------------------------------------------------------------
     connection.on(LiveTranscriptionEvents.Open, () => {
       console.log(`👂 Deepgram STT: Connection opened for ${userId}`);
+      streamState.isReady = true;
+      
+      // Send any buffered chunks now that connection is open
+      if (streamState.pendingChunks.length > 0) {
+        console.log(`👂 Deepgram STT: Sending ${streamState.pendingChunks.length} buffered chunks`);
+        for (const chunk of streamState.pendingChunks) {
+          connection.send(chunk);
+        }
+        streamState.pendingChunks = [];
+      }
     });
 
     // -------------------------------------------------------------------------
@@ -134,19 +149,40 @@ class STTService {
 
     const now = Date.now();
 
-    // Send audio to Deepgram
+    // Send audio to Deepgram (or buffer if not ready yet)
     if (stream.connection && audioChunk) {
-      stream.connection.send(audioChunk);
+      if (stream.isReady) {
+        // Connection is open, send directly
+        stream.connection.send(audioChunk);
+      } else {
+        // Connection not ready, buffer the chunk
+        stream.pendingChunks.push(audioChunk);
+      }
     }
 
-    // -------------------------------------------------------------------------
+     // -------------------------------------------------------------------------
     // SAFEGUARD A: MAX CONTINUOUS SPEECH (Filibuster Protection)
     // -------------------------------------------------------------------------
+    
+    // 1. Reset timer if there's been a significant pause (e.g. 3 seconds)
+    // This ensures we don't count meaningful pauses as "continuous speech"
+    const gapDuration = now - stream.lastVoiceTime;
+    if (stream.continuousSpeechStart && gapDuration > 3000) {
+       //console.log(`⏸️ STT: Resetting continuous speech timer after ${gapDuration}ms silence`);
+       stream.continuousSpeechStart = null;
+    }
+
     if (stream.isSpeaking && stream.continuousSpeechStart) {
       const duration = now - stream.continuousSpeechStart;
       
       if (duration > AI_CONFIG.STT.MAX_CONTINUOUS_SPEECH_MS) {
-        console.warn(`🛑 STT: User ${userId} exceeded max speech duration.`);
+        console.warn(`🛑 STT: User ${userId} exceeded max speech duration (${(duration/1000).toFixed(1)}s)`);
+        
+        // CRITICAL FIX: Reset the timer so we don't spam this error for every single subsequent chunk
+        // This allows the interview handler to decide whether to stop or continue, 
+        // without getting flooded with 4-errors-per-second.
+        stream.continuousSpeechStart = null; 
+        
         return 'MAX_DURATION_EXCEEDED';
       }
     }

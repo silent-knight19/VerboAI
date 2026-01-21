@@ -276,6 +276,19 @@ class SocketService {
     if (!this.socket) return;
     this.socket.off(event);
   }
+  // ===========================================================================
+  // HELPER: EMIT (Send events)
+  // ===========================================================================
+  /*
+    emit(event, data)
+    
+    ROLE: Send a message to the backend.
+    WHY:  Used for 'audio:chunk', 'interview:start', etc.
+  */
+  emit(event, data) {
+    if (!this.socket) return;
+    this.socket.emit(event, data);
+  }
 }
 
 

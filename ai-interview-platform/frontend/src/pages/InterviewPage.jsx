@@ -54,6 +54,7 @@ import useAuthStore from '../store/auth.store';
   WHY: We use this to connect, start session, send heartbeats, and end session.
 */
 import SocketService from '../services/socket.service';
+import useAudioRecorder from '../hooks/useAudioRecorder';
 
 
 // =============================================================================
@@ -72,6 +73,16 @@ const InterviewPage = () => {
   // Get 'user' (Firebase user object) and 'loading' (is Firebase still checking?)
   // from our global auth store.
   const { user, loading } = useAuthStore();
+
+  // AUDIO HOOK (The Ears & Mouth)
+  const { 
+    isRecording, 
+    permissionError, 
+    aiState, 
+    aiMessage, 
+    startRecording, 
+    stopRecording 
+  } = useAudioRecorder();
 
 
   // ---------------------------------------------------------------------------
@@ -210,6 +221,13 @@ const InterviewPage = () => {
       
       // Store the session ID.
       setSessionId(sid);
+      
+      // 2. Start the Interview Pipeline (Deepgram STT + AI)
+      SocketService.emit('interview:start');
+      
+      // 3. Start Audio Recording (Get Mic Access)
+      await startRecording();
+      
       setStatus('running');
 
       // -----------------------------------------------------------------------
@@ -257,6 +275,9 @@ const InterviewPage = () => {
       3. Reset all state.
   */
   const handleEndSession = async () => {
+    // 1. Stop Recording
+    stopRecording();
+    
     // -------------------------------------------------------------------------
     // STEP 1: Clear intervals (stop the timers)
     // -------------------------------------------------------------------------
@@ -328,7 +349,7 @@ const InterviewPage = () => {
     <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center p-4">
       
       {/* ============================== MAIN CARD ============================== */}
-      <div className="bg-white p-8 rounded-xl shadow-lg w-full max-w-md text-center">
+      <div className="bg-white p-8 rounded-xl shadow-lg w-full max-w-md text-center transition-all duration-300">
         
         {/* Title */}
         <h1 className="text-2xl font-bold mb-4 text-gray-800">Mock Interview</h1>
@@ -344,20 +365,50 @@ const InterviewPage = () => {
 
         {/* ------------------------- ERROR MESSAGE ------------------------- */}
         {/* If there's an error, show it in a red box. */}
-        {error && (
+        {(error || permissionError) && (
           <div className="mb-4 p-3 bg-red-50 text-red-600 text-sm rounded border border-red-100">
-            {error}
+            {error || permissionError}
           </div>
         )}
 
-        {/* ------------------------- TIMER DISPLAY ------------------------- */}
+        {/* ------------------------- ACTIVE SESSION UI ------------------------- */}
         {/* Only shown when the session is running. */}
         {status === 'running' && (
-          <div className="mb-8">
+          <div className="mb-8 space-y-6">
+            
+            {/* TIMER */}
             <div className="text-5xl font-mono font-light text-gray-700">
               {formatTime(timeElapsed)}
             </div>
-            <p className="text-gray-400 text-xs mt-2">Session ID: {sessionId}</p>
+            
+            {/* AI STATUS INDICATOR (The "Brain" State) */}
+            <div className="flex flex-col items-center justify-center space-y-2">
+               <div className={`w-24 h-24 rounded-full flex items-center justify-center transition-all duration-500
+                 ${aiState === 'LISTENING' ? 'bg-blue-100 border-4 border-blue-200 animate-pulse' : 
+                   aiState === 'THINKING' ? 'bg-yellow-100 border-4 border-yellow-200' : 
+                   aiState === 'SPEAKING' ? 'bg-purple-100 border-4 border-purple-200 shadow-lg scale-110' : 
+                   'bg-gray-100'}`}>
+                 
+                 <span className="text-3xl">
+                   {aiState === 'LISTENING' ? '👂' : 
+                    aiState === 'THINKING' ? '🧠' : 
+                    aiState === 'SPEAKING' ? '🗣️' : '😴'}
+                 </span>
+               </div>
+               
+               <p className="font-semibold text-gray-700">
+                 {aiState === 'LISTENING' ? 'Listening...' : 
+                  aiState === 'THINKING' ? 'Thinking...' : 
+                  aiState === 'SPEAKING' ? 'Speaking...' : 'Ready'}
+               </p>
+            </div>
+
+            {/* AI MESSAGE (Transcript) */}
+            <div className="bg-gray-50 p-4 rounded-lg text-sm text-gray-600 min-h-[60px] flex items-center justify-center italic">
+              "{aiMessage}"
+            </div>
+
+            <p className="text-gray-400 text-xs">Session ID: {sessionId}</p>
           </div>
         )}
 
@@ -385,7 +436,7 @@ const InterviewPage = () => {
           )}
 
           {/* RECONNECT BUTTON: Shown when disconnected or error */}
-          {(status === 'disconnected' || status === 'error') && (
+          {(status === 'disconnected' || status === 'error' || status === 'ending') && (
             <button 
               onClick={() => window.location.reload()}
               className="w-full bg-gray-200 hover:bg-gray-300 text-gray-700 font-semibold py-3 px-6 rounded-lg transition-colors"
@@ -399,8 +450,8 @@ const InterviewPage = () => {
         {/* ------------------------- INFO TEXT ------------------------- */}
         <p className="mt-8 text-xs text-gray-400">
           {status === 'running' 
-            ? 'Your session is active. Do not close this tab.' 
-            : 'Click start to begin your session. Time will be deducted from your daily limit.'}
+            ? 'Speaking naturally... I am listening.' 
+            : 'Click start to begin. Microphone access required.'}
         </p>
 
       </div>
