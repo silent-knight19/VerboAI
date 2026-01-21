@@ -32,6 +32,8 @@ const useAudioRecorder = () => {
   // AI State (matches backend: 'IDLE' | 'LISTENING' | 'THINKING' | 'SPEAKING')
   const [aiState, setAiState] = useState('IDLE'); 
   const [aiMessage, setAiMessage] = useState('Ready to start...');
+  const [chatHistory, setChatHistory] = useState([]); // Array of { role: 'user'|'ai', text }
+  const [isTerminated, setIsTerminated] = useState(false); // NEW: Track termination state
 
   // ===========================================================================
   // REFS (Mutable state that doesn't trigger re-renders)
@@ -168,6 +170,14 @@ const useAudioRecorder = () => {
     });
 
     // -------------------------------------------------------------------------
+    // LISTENER X: User Transcript (for Chat UI)
+    // -------------------------------------------------------------------------
+    SocketService.socket.on('user:transcript', (data) => {
+      console.log('🗣️ User Transcript:', data.text);
+      setChatHistory(prev => [...prev, { role: 'user', text: data.text, timestamp: new Date() }]);
+    });
+
+    // -------------------------------------------------------------------------
     // LISTENER 2: Audio Responses from AI (THE CRITICAL ONE)
     // -------------------------------------------------------------------------
     SocketService.socket.on('audio:response', (data) => {
@@ -178,6 +188,7 @@ const useAudioRecorder = () => {
       
       if (data.text) {
         setAiMessage(data.text);
+        setChatHistory(prev => [...prev, { role: 'ai', text: data.text, timestamp: new Date() }]);
       }
       
       if (data.audio) {
@@ -215,7 +226,40 @@ const useAudioRecorder = () => {
     });
 
     // -------------------------------------------------------------------------
-    // LISTENER 3: Error events
+    // LISTENER 3: Security & Anti-Cheating (Backend Authority)
+    // -------------------------------------------------------------------------
+    SocketService.socket.on('session:warning', (data) => {
+      console.warn('⚠️ Security Warning:', data.message);
+      // Inject System Message into Chat (Red Alert)
+      setChatHistory(prev => [...prev, { 
+        role: 'system', 
+        text: data.message, 
+        timestamp: new Date() 
+      }]);
+    });
+
+    SocketService.socket.on('session:end', (data) => {
+      console.error('🛑 Session Terminated:', data.message);
+      
+      // Stop everything
+      setIsRecording(false);
+      setIsTerminated(true); // NEW: Lock the UI
+      if (mediaRecorderRef.current) mediaRecorderRef.current.stop();
+      if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+      
+      // Show Termination Message
+      setChatHistory(prev => [...prev, { 
+        role: 'system', 
+        text: `🚫 TERMINATED: ${data.message}`, 
+        timestamp: new Date() 
+      }]);
+      
+      setAiMessage("SESSION TERMINATED. PLEASE CONTACT SUPPORT.");
+      setAiState("IDLE");
+    });
+
+    // -------------------------------------------------------------------------
+    // LISTENER 4: Error events
     // -------------------------------------------------------------------------
     SocketService.socket.on('error', (err) => {
       console.error('❌ Socket error:', err.message);
@@ -227,6 +271,32 @@ const useAudioRecorder = () => {
     console.log('✅ All socket listeners registered successfully!');
     return true;
   }, [playAudioResponse]);
+
+  // ===========================================================================
+  // EFFECT: Anti-Cheating (Tab Switch Detection)
+  // Only active when interview is actually running (isRecording)
+  // ===========================================================================
+  useEffect(() => {
+    console.log(`👁️ Anti-Cheating: Monitor initialized (Recording: ${isRecording})`);
+
+    const handleVisibilityChange = () => {
+      console.log(`👁️ Visibility Changed. Hidden: ${document.hidden}, Recording: ${isRecording}`);
+      
+      // ONLY trigger if the user is in an active session (recording audio)
+      // and checking document.hidden (user left the tab)
+      if (document.hidden && isRecording) {
+         console.warn("🫣 User switched tabs during interview! Reporting violation...");
+         SocketService.emit('session:violation');
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [isRecording]); // Added dependency on isRecording
+
 
   // ===========================================================================
   // EFFECT: Try to set up listeners when component mounts
@@ -256,8 +326,11 @@ const useAudioRecorder = () => {
       // Remove listeners if socket exists
       if (SocketService.socket) {
         SocketService.socket.off('interview:status');
+        SocketService.socket.off('user:transcript');
         SocketService.socket.off('audio:response');
         SocketService.socket.off('error');
+        SocketService.socket.off('session:warning'); // New
+        SocketService.socket.off('session:end');     // New
       }
       
       listenersRegisteredRef.current = false;
@@ -341,12 +414,15 @@ const useAudioRecorder = () => {
   // ===========================================================================
   return {
     isRecording,
+    isTerminated, // NEW: Export this
     permissionError,
     aiState,
     aiMessage,
     startRecording,
     stopRecording,
-    toggleRecording
+    stopRecording,
+    toggleRecording,
+    chatHistory
   };
 };
 

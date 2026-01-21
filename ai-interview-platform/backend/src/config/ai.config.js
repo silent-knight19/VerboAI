@@ -62,9 +62,9 @@ const AI_CONFIG = {
     /*
       MODEL_NAME: 
       Cerebras Cloud API Model.
-      'gpt-oss-120b' is their most capable model.
+      'llama-3.1-8b' is blazing fast (Instant).
     */
-    MODEL_NAME: 'llama-3.3-70b', 
+    MODEL_NAME: 'llama-3.1-8b', 
     
     /*
       BASE_URL:
@@ -74,11 +74,10 @@ const AI_CONFIG = {
 
     /*
       MAX_TOKENS_PER_RESPONSE:
-      The hard limit on how much the AI can write in ONE turn.
-      ~150 tokens is about 1 minute of speaking time.
-      Keeps answers concise and interview-like.
+      Rigid limit to force concise answers.
+      300 tokens is enough for ~2 paragraphs.
     */
-    MAX_TOKENS_PER_RESPONSE: 1000,
+    MAX_TOKENS_PER_RESPONSE: 300,
 
     /*
       TEMPERATURE:
@@ -109,7 +108,7 @@ const AI_CONFIG = {
         - 'en-US-AndrewNeural' (Male, US)
         - 'en-US-JennyNeural' (Female, friendly)
     */
-    VOICE_NAME: 'en-IN-NeerjaNeural',
+    VOICE_NAME: 'en-US-AvaNeural',
     
     /*
       MAX_CHARACTERS:

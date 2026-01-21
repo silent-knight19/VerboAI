@@ -54,17 +54,58 @@ module.exports = (io, socket) => {
     state = 'LISTENING';
     
     // Start Deepgram stream with a callback for when transcripts arrive
-    STTService.startStream(uid, async (transcript) => {
-      // This callback is called by Deepgram when a final transcript is ready
-      if (state === 'LISTENING' && transcript.trim()) {
-        // Apply same truncation as audio:end for consistency
-        let safeTranscript = transcript;
+    // Transcript Buffer to handle split utterances
+    let transcriptBuffer = '';
+    let transcriptTimer = null;
+    const TRANSCRIPT_DEBOUNCE_MS = 800; // 0.8s silence after speech ends
+
+    STTService.startStream(uid, async (data) => {
+      // Only process if we are listening
+      if (state !== 'LISTENING') return;
+
+      // Handle both legacy string and new object format
+      const { text, isFinal } = (typeof data === 'string') 
+        ? { text: data, isFinal: true } 
+        : data;
+
+      if (!text || !text.trim()) return;
+
+      // 1. ALWAYS reset timer on ANY activity (Interim or Final)
+      // This ensures we never cut the user off while they are actively speaking
+      if (transcriptTimer) clearTimeout(transcriptTimer);
+
+      // 2. If Final, create/append to the buffer
+      if (isFinal) {
+        console.log(`📝 Buffering Final: "${text}"`);
+        transcriptBuffer += (transcriptBuffer ? ' ' : '') + text.trim();
+      }
+
+      // 3. Set the timer with DYNAMIC logic based on punctuation
+      // If the user finished a sentence (., ?, !), they are likely done -> Wait Short (1s)
+      // If they trailed off without punctuation, they might be thinking -> Wait Long (2.5s)
+      
+      const lastChar = transcriptBuffer.trim().slice(-1);
+      const isCompleteSentence = ['.', '?', '!'].includes(lastChar);
+      
+      // Dynamic Wait Time
+      const waitTime = isCompleteSentence ? 1000 : 2500;
+
+      transcriptTimer = setTimeout(async () => {
+        if (!transcriptBuffer.trim()) return; // Don't send empty thoughts
+
+        console.log(`🚀 Processing Turn (Waited ${waitTime}ms): "${transcriptBuffer}"`);
+        
+        let safeTranscript = transcriptBuffer;
+        transcriptBuffer = ''; // Clear immediately
+        
+        // Truncate if too long
         if (safeTranscript.length > MAX_TRANSCRIPT_LENGTH) {
-          console.warn(`🛑 Interview: Deepgram transcript too long. Truncating.`);
+          console.warn(`🛑 Interview: Transcript too long. Truncating.`);
           safeTranscript = safeTranscript.substring(0, MAX_TRANSCRIPT_LENGTH) + '...';
         }
+        
         await handleUserTurnComplete(safeTranscript);
-      }
+      }, waitTime);
     });
     
     socket.emit('interview:status', { state: 'LISTENING', message: 'I am listening...' });
@@ -158,6 +199,9 @@ module.exports = (io, socket) => {
     // A. SWITCH STATE -> THINKING
     state = 'THINKING';
     socket.emit('interview:status', { state: 'THINKING', message: 'Let me think...' });
+    
+    // NEW: Emit the user's transcript so frontend can show it in chat
+    socket.emit('user:transcript', { text: userText });
 
     try {
       // B. CALL LLM (The Brain)
@@ -196,6 +240,37 @@ module.exports = (io, socket) => {
       state = 'LISTENING'; // Reset safely
     }
   }
+
+  // ===========================================================================
+  // EVENT: session:violation (Anti-Cheating)
+  // ===========================================================================
+  let violationCount = 0;
+  
+  socket.on('session:violation', () => {
+    violationCount++;
+    console.warn(`🚨 Security: Violation detected for ${uid} (Count: ${violationCount})`);
+
+    if (violationCount === 1) {
+      // Strike 1: Stern Warning
+      socket.emit('session:warning', { 
+        message: '⚠️ Warning: Tab switching is PROHIBITED. One more violation will terminate the interview.' 
+      });
+      // Interrupt AI if speaking
+      if (state === 'SPEAKING') {
+         // Logic to stop audio could go here, but for now we just warn
+      }
+    } 
+    else if (violationCount >= 2) {
+      // Strike 2: Termination
+      console.error(`🛑 Security: Terminating session for ${uid} due to repeated violations.`);
+      state = 'IDLE'; // Kill the loop
+      socket.emit('session:end', { 
+        reason: 'violation',
+        message: '🚫 Interview Terminated. Integrity violation detected.' 
+      });
+      // Ideally, we would also flag the user in the database here
+    }
+  });
 
 
   // ===========================================================================

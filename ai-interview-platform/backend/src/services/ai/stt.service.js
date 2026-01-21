@@ -58,7 +58,7 @@ class STTService {
       language: AI_CONFIG.STT.DEEPGRAM_LANGUAGE,
       smart_format: true,      // Auto-punctuation
       interim_results: true,   // Get results as user speaks
-      endpointing: 300,        // 300ms silence = end of utterance
+      endpointing: 900,        // 500ms silence. We buffer this in the handler now.
       punctuate: true,         // Add punctuation
     });
 
@@ -91,10 +91,9 @@ class STTService {
           streamState.continuousSpeechStart = Date.now();
         }
         
-        // If this is a final transcript, call the callback
-        if (isFinal) {
-          streamState.onTranscript(transcript);
-        }
+        // Send BOTH Interim and Final results to the handler.
+        // The handler needs Interim results to know "User is still speaking" (to reset buffer timer).
+        streamState.onTranscript({ text: transcript, isFinal });
       }
     });
 

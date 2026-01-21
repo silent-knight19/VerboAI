@@ -15,21 +15,8 @@ import { AuthService } from "../services/auth.service";
 function DashboardPage() {
   const navigate = useNavigate();
   
-  /*
-    Get user and profile from store using SEPARATE selectors
-    
-    WHY SEPARATE? 
-    If we return an object like { user, profile }, React sees 
-    a "new" object every render and causes an infinite loop.
-    Using separate selectors returns primitives/stable references.
-  */
-  const user = useAuthStore(function(state) {
-    return state.user;
-  });
-  
-  const profile = useAuthStore(function(state) {
-    return state.profile;
-  });
+  const user = useAuthStore(state => state.user);
+  const profile = useAuthStore(state => state.profile);
 
   // Handler for logout
   function handleLogout() {
@@ -37,128 +24,169 @@ function DashboardPage() {
     AuthService.logout();
   }
 
-  // If data is somehow missing (rare because AuthGuard protects this), return null
   if (!user) return null;
 
   return (
-    // Outer Container: Gradient background for a premium feel
-    <div className="min-h-screen bg-slate-50 flex flex-col items-center py-12 px-4 sm:px-6 lg:px-8 font-sans">
+    // Outer Container: Deep Dark Background with subtle ambient light
+    <div className="min-h-screen bg-slate-950 text-slate-200 font-sans selection:bg-violet-500/30">
       
-      {/* Header Area */}
-      <div className="w-full max-w-4xl mb-8 flex justify-between items-center">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-zinc-900 rounded-lg flex items-center justify-center shadow-lg shadow-blue-200 overflow-hidden">
-            <img src="/logo.png" alt="VerboAI Logo" className="w-full h-full object-contain scale-125" />
-          </div>
-          <h2 className="text-xl font-bold text-slate-800">VerboAI</h2>
-        </div>
-        
-        <button 
-          onClick={handleLogout}
-          className="text-slate-500 hover:text-red-600 font-medium transition-colors text-sm"
-        >
-          Sign Out
-        </button>
+      {/* Ambient Background Effects */}
+      <div className="fixed inset-0 pointer-events-none overflow-hidden">
+        <div className="absolute top-0 left-1/4 w-96 h-96 bg-violet-600/10 rounded-full blur-3xl transform -translate-y-1/2"></div>
+        <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-cyan-600/10 rounded-full blur-3xl transform translate-y-1/2"></div>
       </div>
 
-      {/* Main Content Card */}
-      <main className="w-full max-w-4xl">
-        <div className="bg-white rounded-2xl shadow-xl shadow-slate-200/60 overflow-hidden border border-slate-100">
+      <div className="relative max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        
+        {/* Header Navigation */}
+        <header className="flex justify-between items-center mb-12">
+          <div className="flex items-center gap-4">
+            <div className="w-12 h-12 bg-gradient-to-br from-violet-600 to-indigo-600 rounded-xl flex items-center justify-center shadow-lg shadow-violet-500/20 border border-white/10">
+              <span className="text-2xl">🤖</span>
+            </div>
+            <div>
+              <h2 className="text-2xl font-bold text-white tracking-tight">VerboAI</h2>
+              <span className="text-xs text-slate-500 font-medium uppercase tracking-wider">Interview Mastery</span>
+            </div>
+          </div>
           
-          {/* Top Banner / Hero Section */}
-          <div className="bg-gradient-to-r from-blue-600 to-indigo-700 px-8 py-10 text-white">
-            <div className="flex flex-col sm:flex-row items-center gap-6">
+          <button 
+            onClick={handleLogout}
+            className="group flex items-center gap-2 px-5 py-2.5 rounded-full bg-slate-900/50 border border-slate-800 hover:border-red-500/50 hover:bg-red-500/10 transition-all duration-300 backdrop-blur-md"
+          >
+            <span className="text-sm font-medium text-slate-400 group-hover:text-red-400 transition-colors">Sign Out</span>
+          </button>
+        </header>
+
+        {/* Hero Section */}
+        <section className="mb-12 relative overflow-hidden rounded-3xl border border-slate-800 bg-slate-900/40 backdrop-blur-xl shadow-2xl">
+          {/* Decorative Gradient Overlay */}
+          <div className="absolute inset-0 bg-gradient-to-r from-violet-600/20 via-transparent to-cyan-600/10 opacity-50"></div>
+          
+          <div className="relative p-8 md:p-12 flex flex-col md:flex-row items-center gap-8 z-10">
+            <div className="relative group">
+              <div className="absolute inset-0 bg-gradient-to-r from-violet-500 to-cyan-500 rounded-full blur opacity-20 group-hover:opacity-40 transition-opacity"></div>
               <img 
-                src={user.photoURL || "https://ui-avatars.com/api/?name=" + user.displayName} 
+                src={user.photoURL || "https://ui-avatars.com/api/?name=" + user.displayName + "&background=random"} 
                 alt="Profile" 
-                className="w-24 h-24 rounded-2xl border-4 border-white/20 shadow-xl"
+                className="relative w-28 h-28 rounded-full border-4 border-slate-900 shadow-xl object-cover"
               />
-              <div className="text-center sm:text-left">
-                <h1 className="text-3xl font-extrabold tracking-tight">
-                  Welcome back, {user.displayName || 'Friend'}!
-                </h1>
-                <p className="mt-1 text-blue-100 text-lg opacity-90">
-                  Ready to master your next interview?
-                </p>
-              </div>
+            </div>
+            
+            <div className="text-center md:text-left space-y-2 flex-1">
+              <h1 className="text-4xl md:text-5xl font-extrabold text-white tracking-tight">
+                Welcome back, <span className="text-transparent bg-clip-text bg-gradient-to-r from-violet-400 to-cyan-400">{user.displayName?.split(' ')[0] || 'Friend'}</span>!
+              </h1>
+              <p className="text-lg text-slate-400 max-w-2xl">
+                Your AI interviewer is prepped and ready. Let's sharpen those skills.
+              </p>
             </div>
           </div>
+        </section>
 
-          {/* Action Grid */}
-          <div className="p-8">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {/* Dashboard Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+          
+          {/* LEFT COLUMN: Stats & Info */}
+          <div className="space-y-8">
+            {/* User Card */}
+            <div className="bg-slate-900/50 border border-slate-800 rounded-2xl p-6 backdrop-blur-sm relative overflow-hidden group hover:border-slate-700 transition-all">
+              <div className="flex items-center justify-between mb-6">
+                <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">Profile</h3>
+                <span className="px-2 py-1 rounded text-[10px] font-bold bg-violet-500/10 text-violet-400 border border-violet-500/20 uppercase">
+                  {profile?.role || "Free Plan"}
+                </span>
+              </div>
               
-              {/* Profile Info Card */}
-              <div className="md:col-span-1 border border-slate-100 rounded-xl p-6 bg-slate-50/50">
-                <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-4">Account</h3>
-                <div className="space-y-4">
-                  <div>
-                    <p className="text-xs text-slate-400">Email Address</p>
-                    <p className="text-slate-700 font-medium truncate">{user.email}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-slate-400">Member Since</p>
-                    <p className="text-slate-700 font-medium">
-                      {profile?.createdAt 
-                        ? new Date(profile.createdAt._seconds * 1000).toLocaleDateString() 
-                        : 'Loading...'}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-slate-400 mb-1">User ID</p>
-                    <code className="text-[10px] bg-slate-200 p-1 rounded text-slate-600 block truncate">
-                      {profile?.uid || "Syncing..."}
-                    </code>
-                  </div>
-                  <div className="pt-2">
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
-                      {profile?.role || "User"}
-                    </span>
-                  </div>
+              <div className="space-y-4">
+                <div className="p-3 rounded-xl bg-slate-950/50 border border-slate-800/50">
+                  <p className="text-xs text-slate-500 mb-1">Email</p>
+                  <p className="text-slate-200 text-sm font-medium truncate">{user.email}</p>
+                </div>
+                
+                <div className="p-3 rounded-xl bg-slate-900/30 border border-slate-800/30">
+                  <p className="text-xs text-slate-500 mb-1">User ID</p>
+                  <code className="text-[10px] text-slate-400 font-mono block truncate opacity-70">
+                    {profile?.uid || "Loading..."}
+                  </code>
+                </div>
+
+                <div className="flex items-center gap-2 pt-2">
+                  <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
+                  <span className="text-xs text-slate-400">Account Active</span>
                 </div>
               </div>
-
-              {/* Quick Actions Card */}
-              <div className="md:col-span-2 space-y-4">
-                <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider">Quick Actions</h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <button 
-                    onClick={() => navigate('/interview')}
-                    className="flex flex-col items-start p-4 bg-white border border-slate-200 rounded-xl hover:border-blue-500 hover:shadow-md transition-all group text-left"
-                  >
-                    <span className="p-2 bg-blue-50 text-blue-600 rounded-lg group-hover:bg-blue-600 group-hover:text-white transition-colors mb-4">
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                      </svg>
-                    </span>
-                    <span className="font-bold text-slate-800">Start Practice</span>
-                    <span className="text-xs text-slate-500">Practice with AI Interviewer</span>
-                  </button>
-
-                  <button className="flex flex-col items-start p-4 bg-white border border-slate-200 rounded-xl hover:border-blue-500 hover:shadow-md transition-all group text-left">
-                    <span className="p-2 bg-emerald-50 text-emerald-600 rounded-lg group-hover:bg-emerald-600 group-hover:text-white transition-colors mb-4">
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                      </svg>
-                    </span>
-                    <span className="font-bold text-slate-800">Performance</span>
-                    <span className="text-xs text-slate-500">View your feedback history</span>
-                  </button>
-                </div>
-              </div>
-
             </div>
           </div>
 
-          {/* Footer Info */}
-          <div className="bg-slate-50 border-t border-slate-100 px-8 py-4">
-            <p className="text-center text-xs text-slate-400">
-              Welcome to the VerboAI Platform. Start a session above to begin.
-            </p>
+          {/* RIGHT COLUMN: Actions (Spans 2 cols) */}
+          <div className="md:col-span-2 space-y-6">
+            <h3 className="text-sm font-semibold text-slate-400 uppercase tracking-wider ml-1">Quick Actions</h3>
+            
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+              
+              {/* START PRACTICE CARD */}
+              <button 
+                onClick={() => navigate('/interview')}
+                className="group relative flex flex-col items-start p-8 bg-gradient-to-b from-slate-800/50 to-slate-900/50 border border-slate-700/50 rounded-3xl hover:border-violet-500 hover:shadow-lg hover:shadow-violet-500/20 transition-all duration-300 text-left overflow-hidden"
+              >
+                <div className="absolute inset-0 bg-violet-600/5 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                
+                <div className="mb-6 p-4 rounded-2xl bg-violet-500/10 text-violet-400 group-hover:scale-110 group-hover:bg-violet-500 group-hover:text-white transition-all duration-300">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                  </svg>
+                </div>
+                
+                <h3 className="text-xl font-bold text-white mb-2 group-hover:translate-x-1 transition-transform">Start Interview</h3>
+                <p className="text-slate-400 text-sm leading-relaxed group-hover:text-slate-300 transition-colors">
+                  Launch a new AI-driven mock interview session. Real-time feedback and voice interaction.
+                </p>
+                
+                <div className="mt-6 flex items-center gap-2 text-violet-400 text-sm font-bold group-hover:gap-3 transition-all">
+                  <span>Begin Session</span>
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 8l4 4m0 0l-4 4m4-4H3" />
+                  </svg>
+                </div>
+              </button>
+
+              {/* PERFORMANCE CARD */}
+              <button 
+                className="group relative flex flex-col items-start p-8 bg-gradient-to-b from-slate-800/50 to-slate-900/50 border border-slate-700/50 rounded-3xl hover:border-emerald-500 hover:shadow-lg hover:shadow-emerald-500/10 transition-all duration-300 text-left overflow-hidden"
+              >
+                <div className="absolute inset-0 bg-emerald-600/5 opacity-0 group-hover:opacity-100 transition-opacity"></div>
+
+                <div className="mb-6 p-4 rounded-2xl bg-emerald-500/10 text-emerald-400 group-hover:scale-110 group-hover:bg-emerald-500 group-hover:text-white transition-all duration-300">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                  </svg>
+                </div>
+                
+                <h3 className="text-xl font-bold text-white mb-2 group-hover:translate-x-1 transition-transform">My Analytics</h3>
+                <p className="text-slate-400 text-sm leading-relaxed group-hover:text-slate-300 transition-colors">
+                  Touch base with your progress. View past scores, feedback history, and improvement areas.
+                </p>
+
+                <div className="mt-6 flex items-center gap-2 text-emerald-400 text-sm font-bold group-hover:gap-3 transition-all">
+                  <span>View Stats</span>
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                  </svg>
+                </div>
+              </button>
+
+            </div>
           </div>
 
         </div>
-      </main>
+
+        {/* Footer */}
+        <footer className="mt-16 text-center">
+            <p className="text-slate-600 text-sm">© {(new Date()).getFullYear()} VerboAI. All systems operational.</p>
+        </footer>
+
+      </div>
     </div>
   );
 }

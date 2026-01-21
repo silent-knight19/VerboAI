@@ -82,8 +82,9 @@ class LLMService {
       let answer = completion.choices[0].message.content || "";
 
       // SAFEGUARD 3: STRICT OUTPUT SANITIZATION (TTS Safety)
-      // User mandated: Only alphabets, numbers, and spacing.
-      answer = answer.replace(/[^a-zA-Z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+      // Allow alphabets, numbers, spacing, and basic punctuation for natural speech.
+      // We strip dangerous shell characters but keep .,?!'-
+      answer = answer.replace(/[^a-zA-Z0-9\s.,?!'-]/g, " ").replace(/\s+/g, " ").trim();
 
       if (!answer) {
          console.warn("🧠 LLM: Empty response received!", JSON.stringify(completion, null, 2));
