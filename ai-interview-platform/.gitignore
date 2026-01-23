@@ -65,3 +65,9 @@ marketing/
 task.md
 systemdesign.html
 systemdesign.pdf
+
+# Audio/Video Artifacts
+*.mp3
+*.wav
+*.mp4
+*.webm

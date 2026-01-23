@@ -32,7 +32,7 @@ const AI_CONFIG = {
       The transcription model to use.
       'nova-2' is Deepgram's fastest, most accurate model.
     */
-    DEEPGRAM_MODEL: 'nova-2',
+    DEEPGRAM_MODEL: 'nova-3',
     
     /*
       DEEPGRAM_LANGUAGE:
@@ -64,7 +64,7 @@ const AI_CONFIG = {
       Cerebras Cloud API Model.
       'llama-3.1-8b' is blazing fast (Instant).
     */
-    MODEL_NAME: 'llama-3.1-8b', 
+    MODEL_NAME: 'gpt-oss-120b', 
     
     /*
       BASE_URL:

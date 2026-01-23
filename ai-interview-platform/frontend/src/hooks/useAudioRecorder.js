@@ -44,6 +44,8 @@ const useAudioRecorder = () => {
   const audioElementRef = useRef(null);  // For HTML5 Audio playback
   const listenersRegisteredRef = useRef(false);  // Track if listeners are set up
   const isPlayingRef = useRef(false); // Track if audio is currently playing
+  const audioQueueRef = useRef([]);
+  const isProcessingQueueRef = useRef(false);
 
   // ===========================================================================
   // HELPER: Convert Base64 string to Blob
@@ -63,89 +65,90 @@ const useAudioRecorder = () => {
   };
 
   // ===========================================================================
-  // PLAY AUDIO RESPONSE (The Mouth)
+  // PLAY AUDIO RESPONSE (The Mouth) - Updated for Queue
   // ===========================================================================
-  const playAudioResponse = useCallback((audioBlob) => {
+  const playAudioResponse = useCallback((audioBlob, onComplete, onError) => {
     if (!audioBlob) {
-      console.error('❌ No audio blob to play');
+      if (onError) onError(new Error("No audio blob"));
       return;
     }
 
-    console.log('🔊 Playing audio. Blob size:', audioBlob.size, 'bytes');
-
-    // Stop any currently playing audio
-    if (audioElementRef.current) {
-      const oldAudio = audioElementRef.current;
-      // Prevent "phantom" event logs from the old element
-      oldAudio.onended = null;
-      oldAudio.onerror = null;
-      oldAudio.onplay = null;
-      oldAudio.onloadeddata = null;
-      
-      oldAudio.pause();
-      oldAudio.src = ''; // This can trigger an abort error, so we nullify handler first
-    }
+    console.log('🔊 Playing audio chunk. Blob size:', audioBlob.size, 'bytes');
 
     const audioUrl = URL.createObjectURL(audioBlob);
-    console.log('🔊 Created blob URL:', audioUrl);
-
     const audio = new Audio(audioUrl);
     audioElementRef.current = audio;
 
-    audio.onloadeddata = () => {
-      console.log('🔊 Audio loaded. Duration:', audio.duration, 'seconds');
-    };
-
     audio.onplay = () => {
-      console.log('🔊 Audio started playing');
+      console.log('🔊 Audio chunk started playing');
       isPlayingRef.current = true;
-      setAiState('SPEAKING'); // Force UI to SPEAKING
+      setAiState('SPEAKING'); 
     };
 
     audio.onended = () => {
-      console.log('🔊 Audio finished playing');
+      console.log('🔊 Audio chunk finished');
       isPlayingRef.current = false;
       URL.revokeObjectURL(audioUrl);
-      
-      // When audio finishes, we can safely go to LISTENING (assuming backend is ready)
-      // We optimistically set it to LISTENING here because usually the backend 
-      // has already sent the "LISTENING" status which we ignored during playback.
-      setAiState('LISTENING');
+      if (onComplete) onComplete();
     };
 
     audio.onerror = (e) => {
-      const error = e.target.error;
-      console.error('❌ Audio playback error:', error);
-      console.error('Error Code:', error ? error.code : 'Unknown');
-      console.error('Error Message:', error ? error.message : 'Unknown');
-      
+      console.error('❌ Audio chunk error:', e);
       isPlayingRef.current = false;
       URL.revokeObjectURL(audioUrl);
-      setAiMessage('Audio playback failed. Check console for details.');
+      if (onError) onError(e);
     };
 
-    audio.play()
-      .then(() => {
-        console.log('✅ Audio play() promise resolved');
-      })
-      .catch((error) => {
-        console.error('❌ Audio play() failed:', error);
-        setAiMessage(`Cannot play audio: ${error.message}`);
-        isPlayingRef.current = false;
-      });
+    audio.play().catch(err => {
+       console.error("❌ Audio play() failed immediately:", err);
+       if (onError) onError(err);
+    });
   }, []);
+
+  // ===========================================================================
+  // AUDIO QUEUE MANAGEMENT
+  // ===========================================================================
+  const processAudioQueue = useCallback(async () => {
+    if (isProcessingQueueRef.current || audioQueueRef.current.length === 0) {
+      return;
+    }
+
+    isProcessingQueueRef.current = true;
+    const nextAudioBlob = audioQueueRef.current.shift();
+
+    try {
+      await new Promise((resolve, reject) => {
+        playAudioResponse(nextAudioBlob, resolve, reject);
+      });
+    } catch (err) {
+      console.error("Audio queue processing error:", err);
+    } finally {
+      isProcessingQueueRef.current = false;
+      // Process next item recursively
+      // We use a timeout to let the stack clear and Allow other events
+      setTimeout(() => {
+         // Re-trigger processing if queue has items
+         if (audioQueueRef.current.length > 0) {
+             processAudioQueue(); 
+         } else {
+             // If queue empty and done playing, back to LISTENING
+             // But we have to be careful about race conditions with new chunks arriving
+             // Usually the last chunk finishes, queue is empty -> LISTENING
+             setAiState('LISTENING');
+         }
+      }, 10);
+    }
+  }, [playAudioResponse]);
 
   // ===========================================================================
   // SETUP FUNCTION: Register all socket listeners
   // ===========================================================================
   const setupSocketListeners = useCallback(() => {
-    // Check if socket exists (it's created in SocketService.connect())
     if (!SocketService.socket) {
       console.log('⏳ Socket not ready yet, will retry...');
       return false;
     }
 
-    // Don't register twice
     if (listenersRegisteredRef.current) {
       console.log('✅ Socket listeners already registered');
       return true;
@@ -159,10 +162,11 @@ const useAudioRecorder = () => {
     SocketService.socket.on('interview:status', (data) => {
       console.log('🤖 AI Status:', data.state, data.message || '');
       
-      // CRITICAL: If audio is playing, IGNORE "LISTENING" status from backend.
-      // We want to keep the "SPEAKING" UI state until the audio actually finishes.
-      if (isPlayingRef.current && data.state === 'LISTENING') {
-        console.log('⏳ Audio is still playing. Ignoring "LISTENING" status until playback ends.');
+      const hasQueue = audioQueueRef.current.length > 0;
+      // If we are playing or have queue, ignore "LISTENING" from backend
+      // (Backend might send "LISTENING" after streaming chunks, but we might still be playing)
+      if ((isPlayingRef.current || hasQueue) && data.state === 'LISTENING') {
+        console.log('⏳ Audio playing/queued. Ignoring LISTENING status.');
         return;
       }
 
@@ -171,7 +175,7 @@ const useAudioRecorder = () => {
     });
 
     // -------------------------------------------------------------------------
-    // LISTENER X: User Transcript (for Chat UI)
+    // LISTENER X: User Transcript
     // -------------------------------------------------------------------------
     SocketService.socket.on('user:transcript', (data) => {
       console.log('🗣️ User Transcript:', data.text);
@@ -179,87 +183,74 @@ const useAudioRecorder = () => {
     });
 
     // -------------------------------------------------------------------------
-    // LISTENER 2: Audio Responses from AI (THE CRITICAL ONE)
+    // LISTENER 2: Audio Responses (CHUNKS)
     // -------------------------------------------------------------------------
-    SocketService.socket.on('audio:response', (data) => {
-      console.log('🗣️ Received audio:response event');
-      console.log('🗣️ Text:', data.text);
-      console.log('🗣️ Audio type:', typeof data.audio);
-      console.log('🗣️ Audio data present:', !!data.audio);
-      
-      if (data.text) {
-        setAiMessage(data.text);
-        setChatHistory(prev => [...prev, { role: 'ai', text: data.text, timestamp: new Date() }]);
-      }
-      
-      if (data.audio) {
-        let audioBlob = null;
+    const handleAudioEvent = (data) => {
+       console.log('🗣️ Audio Event (Chunk/Response)');
 
-        // Case 1: Base64 string (what we're sending from backend)
-        if (typeof data.audio === 'string') {
-          console.log('🔈 Audio is Base64 string. Length:', data.audio.length);
-          audioBlob = base64ToBlob(data.audio, 'audio/mpeg');
-        }
-        // Case 2: Node.js Buffer format
-        else if (data.audio.type === 'Buffer' && Array.isArray(data.audio.data)) {
-          console.log('🔈 Audio is Node Buffer. Converting...');
-          const bytes = new Uint8Array(data.audio.data);
-          audioBlob = new Blob([bytes], { type: 'audio/mpeg' });
-        }
-        // Case 3: ArrayBuffer
-        else if (data.audio instanceof ArrayBuffer) {
-          console.log('🔈 Audio is ArrayBuffer');
-          audioBlob = new Blob([data.audio], { type: 'audio/mpeg' });
-        }
-        else {
-          console.error('❌ Unknown audio format:', data.audio);
-        }
+       // 1. Text Append Logic
+       if (data.text) {
+         setAiMessage(data.text);
+         
+         setChatHistory(prev => {
+           const lastMsg = prev[prev.length - 1];
+           // Heuristic: If last msg is AI and < 10 seconds old, append.
+           const isRecent = lastMsg && (new Date() - new Date(lastMsg.timestamp) < 10000);
+           
+           if (lastMsg && lastMsg.role === 'ai' && isRecent) {
+             // Only append if it doesn't already contain the text (dedupe legacy full responses)
+             if (!lastMsg.text.includes(data.text)) {
+                 return [
+                   ...prev.slice(0, -1),
+                   { ...lastMsg, text: lastMsg.text + " " + data.text } 
+                 ];
+             }
+             return prev;
+           } else {
+             return [...prev, { role: 'ai', text: data.text, timestamp: new Date() }];
+           }
+         });
+       }
 
-        if (audioBlob) {
-          console.log('✅ Audio blob created. Size:', audioBlob.size, 'bytes');
-          playAudioResponse(audioBlob);
-        } else {
-          console.error('❌ Failed to create audio blob');
-        }
-      } else {
-        console.warn('⚠️ No audio data in response');
-      }
-    });
+       // 2. Audio Queue Logic
+       if (data.audio) {
+          let audioBlob = null;
+          if (typeof data.audio === 'string') {
+            audioBlob = base64ToBlob(data.audio, 'audio/mpeg');
+          } else if (data.audio.type === 'Buffer') {
+             const bytes = new Uint8Array(data.audio.data);
+             audioBlob = new Blob([bytes], { type: 'audio/mpeg' });
+          }
+
+          if (audioBlob) {
+            audioQueueRef.current.push(audioBlob);
+            processAudioQueue();
+          }
+       }
+    };
+
+    SocketService.socket.on('audio:response', handleAudioEvent);
+    SocketService.socket.on('audio:chunk', handleAudioEvent);
+
 
     // -------------------------------------------------------------------------
-    // LISTENER 3: Security & Anti-Cheating (Backend Authority)
+    // LISTENER 3: Security & Anti-Cheating
     // -------------------------------------------------------------------------
     SocketService.socket.on('session:warning', (data) => {
       console.warn('⚠️ Security Warning:', data.message);
-      
-      // EXPOSE TO UI (For Modal)
       setWarning(data.message);
-      
-      // Inject System Message into Chat (Red Alert)
-      setChatHistory(prev => [...prev, { 
-        role: 'system', 
-        text: data.message, 
-        timestamp: new Date() 
-      }]);
+      setChatHistory(prev => [...prev, { role: 'system', text: data.message, timestamp: new Date() }]);
     });
 
     SocketService.socket.on('session:end', (data) => {
       console.error('🛑 Session Terminated:', data.message);
-      
-      // Stop everything
       setIsRecording(false);
-      setIsTerminated(true); // NEW: Lock the UI
+      setIsTerminated(true);
       if (mediaRecorderRef.current) mediaRecorderRef.current.stop();
       if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
       
-      // Show Termination Message
-      setChatHistory(prev => [...prev, { 
-        role: 'system', 
-        text: `🚫 TERMINATED: ${data.message}`, 
-        timestamp: new Date() 
-      }]);
-      
-      setAiMessage("SESSION TERMINATED. PLEASE CONTACT SUPPORT.");
+      setChatHistory(prev => [...prev, { role: 'system', text: `🚫 TERMINATED: ${data.message}`, timestamp: new Date() }]);
+      setAiMessage("SESSION TERMINATED.");
       setAiState("IDLE");
     });
 
@@ -275,7 +266,7 @@ const useAudioRecorder = () => {
     listenersRegisteredRef.current = true;
     console.log('✅ All socket listeners registered successfully!');
     return true;
-  }, [playAudioResponse]);
+  }, [playAudioResponse, processAudioQueue]);
 
   // ===========================================================================
   // EFFECT: Anti-Cheating (Tab Switch, Blur, Resize/Fullscreen Detection)

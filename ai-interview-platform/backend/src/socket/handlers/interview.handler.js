@@ -49,8 +49,26 @@ module.exports = (io, socket) => {
   // ===========================================================================
   // EVENT: interview:start
   // ===========================================================================
-  socket.on('interview:start', () => {
+  // ===========================================================================
+  // EVENT: interview:start
+  // ===========================================================================
+  socket.on('interview:start', async () => {
     console.log(`🎤 Interview: Starting for ${uid}`);
+    
+    // STARTING GREETING (VerboAI Persona)
+    const GREETING_TEXT = "Hello, I am Verbo-AI, your technical interviewer for today's session. What topics have you prepared?";
+    
+    // Add to History so LLM knows it already said this
+    conversationHistory.push({ role: 'assistant', content: GREETING_TEXT });
+    
+    // Set initial state to SPEAKING
+    state = 'SPEAKING';
+    socket.emit('interview:status', { state: 'SPEAKING', message: 'Initializing...' });
+    
+    // Send Greeting Audio (Async - don't block listening)
+    sendAudioChunk(GREETING_TEXT);
+    
+    // Immediately start listening so we don't miss user input while TTS generates
     state = 'LISTENING';
     
     // Start Deepgram stream with a callback for when transcripts arrive
@@ -193,44 +211,93 @@ module.exports = (io, socket) => {
   // ===========================================================================
   // CORE LOGIC: HANDLE TURN COMPLETION
   // ===========================================================================
+  // ===========================================================================
+  // CORE LOGIC: HANDLE TURN COMPLETION (STREAMING)
+  // ===========================================================================
+  
+  async function sendAudioChunk(text) {
+    if (!text || !text.trim()) return;
+    try {
+      console.log(`🗣️ TTS: Generating chunk: "${text}"`);
+      const audioBuffer = await TTSService.generateAudio(text);
+      const audioBase64 = audioBuffer.toString('base64');
+      
+      socket.emit('audio:chunk', {
+        text: text,
+        audio: audioBase64 
+      });
+    } catch (error) {
+       console.error('❌ TTS Chunk Failed:', error.message);
+    }
+  }
+
   async function handleUserTurnComplete(userText) {
     if (!userText) return;
 
     // A. SWITCH STATE -> THINKING
     state = 'THINKING';
     socket.emit('interview:status', { state: 'THINKING', message: 'Let me think...' });
-    
-    // NEW: Emit the user's transcript so frontend can show it in chat
     socket.emit('user:transcript', { text: userText });
 
+    // Update History immediately with user input
+    conversationHistory.push({ role: 'user', content: userText });
+
     try {
-      // B. CALL LLM (The Brain)
-      const aiResponseText = await LLMService.generateResponse(conversationHistory, userText);
+      // B. CALL LLM (Stream)
+      const stream = LLMService.generateResponseStream(conversationHistory, userText);
       
-      // Update History (Keep it limited to last 10 turns to save tokens)
-      conversationHistory.push({ role: 'user', content: userText });
-      conversationHistory.push({ role: 'assistant', content: aiResponseText });
+      let fullAiResponse = "";
+      let sentenceBuffer = "";
+      let isFirstChunk = true;
+
+      for await (const chunk of stream) {
+        fullAiResponse += chunk;
+        sentenceBuffer += chunk;
+        
+        // Sentence Detection Logic
+        // We look for sentence terminators (. ? !) followed by space or end of string
+        // We also want to avoid splitting "Mr." or "Dr." etc (basic heuristic)
+        // For simplicity, we split on [.?!] + space.
+        
+        const sentenceMatch = sentenceBuffer.match(/([.?!]+)(\s+|$)/);
+        
+        if (sentenceMatch) {
+             const index = sentenceMatch.index + sentenceMatch[0].length;
+             const sentence = sentenceBuffer.substring(0, index);
+             const remaining = sentenceBuffer.substring(index);
+             
+             // Process the sentence
+             if (sentence.trim()) {
+                 if (isFirstChunk) {
+                     state = 'SPEAKING';
+                     socket.emit('interview:status', { state: 'SPEAKING', message: 'Responding...' });
+                     isFirstChunk = false;
+                 }
+                 
+                 // Generate Audio for this sentence
+                 await sendAudioChunk(sentence.trim());
+             }
+             
+             sentenceBuffer = remaining;
+        }
+      }
+
+      // Handle any remaining text in buffer (e.g. no punctuation at absolute end)
+      if (sentenceBuffer.trim()) {
+         if (isFirstChunk) {
+             state = 'SPEAKING';
+             socket.emit('interview:status', { state: 'SPEAKING', message: 'Responding...' });
+         }
+         await sendAudioChunk(sentenceBuffer.trim());
+      }
+      
+      // Update History with full AI response
+      conversationHistory.push({ role: 'assistant', content: fullAiResponse });
       if (conversationHistory.length > 20) conversationHistory = conversationHistory.slice(-20);
 
-      // C. SWITCH STATE -> SPEAKING
-      state = 'SPEAKING';
-      socket.emit('interview:status', { state: 'SPEAKING', message: 'Responding...' });
-
-      // D. GENERATE AUDIO (Edge TTS - Free, Human-like voice)
-      const audioBuffer = await TTSService.generateAudio(aiResponseText);
-
-      // E. SEND RESULT TO CLIENT (Text + Audio)
-      // Convert Buffer to Base64 String to avoid Socket.io binary issues on frontend
-      const audioBase64 = audioBuffer.toString('base64');
-      console.log(`📤 Interview: Sending audio:response. Text length: ${aiResponseText.length}, Audio size: ${audioBase64.length} chars (Base64)`);
-      
-      socket.emit('audio:response', {
-        text: aiResponseText,
-        audio: audioBase64 
-      });
-      
       // F. RESET TO LISTENING
-      // In a more advanced version, we'd wait for 'playback:complete' from client.
+      // Ideally client finishes audio then we go to listening.
+      // But we set it here to allow interruptions or next turn readiness.
       state = 'LISTENING';
       socket.emit('interview:status', { state: 'LISTENING', message: 'Your turn...' });
 

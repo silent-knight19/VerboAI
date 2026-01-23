@@ -295,9 +295,9 @@ async function startInterviewSession(uid) {
     }
 
     // 3. Check Budget
-    if (currentDailyUsed >= (user.dailyTimeLimitSec || 1800)) {
-        throw new Error('Daily time budget exceeded. Come back tomorrow!');
-    }
+    // if (currentDailyUsed >= (user.dailyTimeLimitSec || 1800)) {
+    //     throw new Error('Daily time budget exceeded. Come back tomorrow!');
+    // }
 
     // 4. Handle Existing Session (Force Resume / Force Close)
     // ----------------------------------------------------------
@@ -326,9 +326,9 @@ async function startInterviewSession(uid) {
         });
         
         // Re-check budget after deducting old session time
-        if (currentDailyUsed >= (user.dailyTimeLimitSec || 1800)) {
-            throw new Error('Daily time budget exceeded. Come back tomorrow!');
-        }
+        // if (currentDailyUsed >= (user.dailyTimeLimitSec || 1800)) {
+        //     throw new Error('Daily time budget exceeded. Come back tomorrow!');
+        // }
     }
 
     // 5. Lock Session (Start New)

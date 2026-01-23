@@ -48,16 +48,19 @@ class LLMService {
 
     RETURNS: String (The AI's spoken response)
   */
-  async generateResponse(history, userMessage) {
-    if (!userMessage) return "I didn't catch that.";
+  // ===========================================================================
+  // GENERATE RESPONSE (STREAMING)
+  // ===========================================================================
+  /*
+    generateResponseStream(history, userMessage)
 
-    console.log(`🧠 LLM: Thinking... Input length: ${userMessage.length}`);
+    RETURNS: Async Generator (Yields chunks of text)
+  */
+  async *generateResponseStream(history, userMessage) {
+    if (!userMessage) return;
 
-    // -------------------------------------------------------------------------
-    // SAFEGUARD 1: THE SANDWICH CONSTRUCTION
-    // -------------------------------------------------------------------------
-    // We ALWAYS put the System Prompt first.
-    // We treat user input purely as 'content'.
+    console.log(`🧠 LLM: Thinking (Stream)... Input length: ${userMessage.length}`);
+
     const messages = [
       { role: 'system', content: SYSTEM_PROMPT },
       ...history,
@@ -65,40 +68,28 @@ class LLMService {
     ];
 
     try {
-      // -----------------------------------------------------------------------
-      // SAFEGUARD 2: COST & TIMEOUT CONTROLS
-      // -----------------------------------------------------------------------
-      const completion = await this.openai.chat.completions.create({
+      const stream = await this.openai.chat.completions.create({
         model: AI_CONFIG.LLM.MODEL_NAME,
         messages: messages,
-        // STRICT Output Limit (Money Saver)
         max_tokens: AI_CONFIG.LLM.MAX_TOKENS_PER_RESPONSE,
         temperature: AI_CONFIG.LLM.TEMPERATURE,
+        stream: true, // ENABLE STREAMING
       }, {
-        // STRICT Time Limit (UI Saver)
         timeout: AI_CONFIG.LLM.TIMEOUT_MS 
       });
 
-      let answer = completion.choices[0].message.content || "";
-
-      // SAFEGUARD 3: STRICT OUTPUT SANITIZATION (TTS Safety)
-      // Allow alphabets, numbers, spacing, and basic punctuation for natural speech.
-      // We strip dangerous shell characters but keep .,?!'-
-      answer = answer.replace(/[^a-zA-Z0-9\s.,?!'-]/g, " ").replace(/\s+/g, " ").trim();
-
-      if (!answer) {
-         console.warn("🧠 LLM: Empty response received!", JSON.stringify(completion, null, 2));
+      for await (const chunk of stream) {
+        const token = chunk.choices[0]?.delta?.content || "";
+        if (token) {
+           yield token;
+        }
       }
-      console.log(`🧠 LLM: Answer generated. Tokens: ${completion.usage.total_tokens}`);
       
-      return answer;
+      console.log(`🧠 LLM: Stream finished.`);
 
     } catch (error) {
-      console.error('❌ LLM: Generation failed:', error.message);
-      
-      // FALLBACK RESPONSE (Graceful degradation)
-      // If OpenAI is down or user has no credits, don't crash the app.
-      return "I'm having some trouble connecting to my brain right now. Can we try that again?";
+      console.error('❌ LLM: Streaming failed:', error.message);
+      yield "I'm having trouble thinking right now.";
     }
   }
 }
