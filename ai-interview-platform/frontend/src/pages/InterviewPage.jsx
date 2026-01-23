@@ -17,6 +17,7 @@ import { useNavigate } from 'react-router-dom';
 import useAuthStore from '../store/auth.store';
 import SocketService from '../services/socket.service';
 import useAudioRecorder from '../hooks/useAudioRecorder';
+import useFaceTracker from '../hooks/useFaceTracker';
 
 // --- PROFESSIONAL SVG ICONS (Replacing Emojis) ---
 
@@ -92,26 +93,42 @@ const InterviewPage = () => {
   // 1. Hooks & State Management
   const navigate = useNavigate();
   const { user, loading } = useAuthStore();
-  const messagesEndRef = useRef(null); // Used to keep the chat scrolled to the bottom
+  const messagesEndRef = useRef(null); 
+  const cameraRef = useRef(null); // Ref for local camera feed
+
+  // --- ANTI-CHEAT: VISUALL MONITORING ---
+  const handleFaceViolation = (reason) => {
+    // Only send violations if the interview is actually running
+    if (status === 'running') {
+      console.warn(`🚨 Visual Violation: ${reason}`);
+      SocketService.emit('session:violation', { reason });
+    }
+  };
+
+  const { isFaceTracked, trackerError } = useFaceTracker(handleFaceViolation, cameraRef);
 
   // Extracting logic from our custom audio hook
   const { 
     isRecording, 
-    permissionError, 
+    permissionError: audioPermissionError, 
     aiState, 
-    aiMessage, // Status message (e.g., "AI is thinking...")
+    aiMessage, 
     startRecording, 
     stopRecording,
-    chatHistory, // List of messages for the UI
-    isTerminated, // Security: session locked flag
-    warning,      // Security: violation message
-    setWarning    // Setter to clear the warning modal
+    chatHistory, 
+    isTerminated, 
+    warning,      
+    setWarning    
   } = useAudioRecorder();
 
-  const [status, setStatus] = useState('disconnected'); // local socket status
+  const [status, setStatus] = useState('disconnected'); 
   const [sessionId, setSessionId] = useState(null);
   const [error, setError] = useState(null);
   const [timeElapsed, setTimeElapsed] = useState(0);
+
+  // Combined permission error
+  const permissionError = audioPermissionError || trackerError;
+
 
   // Refs for intervals so we can clean them up properly
   const heartbeatIntervalRef = useRef(null);
@@ -329,31 +346,54 @@ const InterviewPage = () => {
           </div>
 
           {/* AI Avatar Interaction Area */}
-          <div className="z-10 flex flex-col items-center justify-center py-10">
+          <div className="z-10 flex flex-col items-center justify-center py-6">
             <AiOrb state={status === 'running' ? aiState : 'IDLE'} />
 
             {/* Status Information */}
-            <div className="mt-12 text-center space-y-4">
+            <div className="mt-8 text-center space-y-2">
               <div className="space-y-1">
                 <p className="text-[10px] tracking-[0.3em] uppercase text-slate-500 font-bold">Session Duration</p>
-                <h2 className="text-5xl font-outfit font-light text-white tracking-tighter">
+                <h2 className="text-4xl font-outfit font-light text-white tracking-tighter">
                   {status === 'running' ? formatTime(timeElapsed) : '00:00'}
                 </h2>
               </div>
-              
-              <div className="pt-4">
-                <p className={`text-xs tracking-[0.2em] font-bold uppercase transition-colors duration-500
+
+              <div className="pt-2">
+                <p className={`text-[9px] tracking-[0.2em] font-bold uppercase transition-colors duration-500
                   ${aiState === 'SPEAKING' ? 'text-blue-400' : 
                     aiState === 'LISTENING' ? 'text-emerald-400' : 
                     aiState === 'THINKING' ? 'text-amber-400' : 'text-slate-600'}`}>
-                  {aiState === 'IDLE' ? 'System Standby' : aiState}
+                  {status === 'running' ? (aiState === 'IDLE' ? 'Initializing...' : aiState) : 'System Standby'}
                 </p>
               </div>
             </div>
           </div>
 
+          {/* Camera Feed Display */}
+          <div className="z-10 w-full px-4 mb-8">
+            <div className="relative aspect-video rounded-2xl overflow-hidden border border-slate-800 bg-slate-900 shadow-2xl">
+               <video 
+                 ref={cameraRef}
+                 autoPlay 
+                 muted 
+                 playsInline
+                 className="w-full h-full object-cover scale-x-[-1]" // Mirrored for natural feel
+               />
+               {!isFaceTracked && (
+                 <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center text-center p-4">
+                    <p className="text-[10px] text-red-400 font-bold uppercase tracking-widest">Targeting FaceLandmarks...</p>
+                 </div>
+               )}
+               <div className="absolute bottom-3 left-3 flex items-center space-x-2">
+                  <div className={`w-2 h-2 rounded-full ${isFaceTracked ? 'bg-emerald-500' : 'bg-red-500'}`}></div>
+                  <span className="text-[9px] text-white/50 font-bold uppercase tracking-widest">Local Feed</span>
+               </div>
+            </div>
+          </div>
+
           {/* Main Action Buttons */}
           <div className="z-10 w-full space-y-4">
+
             {/* Error Message if any */}
             {(error || permissionError) && (
               <div className="p-4 bg-red-950/30 border border-red-500/20 rounded-xl text-red-400 text-xs text-center">
@@ -405,15 +445,32 @@ const InterviewPage = () => {
           
           {/* Search/Header Bar */}
           <div className="h-24 border-b border-slate-900/50 flex items-center justify-between px-10">
+            {/* Voice Activity Indicator */}
             <div className="flex items-center space-x-4">
               <div className="w-2 h-2 rounded-full bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)]"></div>
               <h3 className="text-sm font-outfit font-semibold text-slate-300 tracking-widest uppercase">Live Interview Transcript</h3>
             </div>
-            {sessionId && (
-              <div className="px-3 py-1 bg-slate-900 border border-slate-800 rounded-md">
-                <span className="text-[10px] text-slate-500 font-mono">STATION: {sessionId.substring(0,8)}</span>
-              </div>
-            )}
+            
+            {/* Visual Monitoring Status */}
+            <div className="flex items-center space-x-3">
+              {isFaceTracked ? (
+                <div className="flex items-center space-x-2 px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 rounded-full">
+                  <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></div>
+                  <span className="text-[10px] text-emerald-400 font-bold uppercase tracking-wider">Secure Video Active</span>
+                </div>
+              ) : (
+                <div className="flex items-center space-x-2 px-3 py-1 bg-red-500/10 border border-red-500/20 rounded-full">
+                  <div className="w-1.5 h-1.5 bg-red-500 rounded-full animate-pulse"></div>
+                  <span className="text-[10px] text-red-400 font-bold uppercase tracking-wider">Face Not Detected</span>
+                </div>
+              )}
+              
+              {sessionId && (
+                <div className="px-3 py-1 bg-slate-900 border border-slate-800 rounded-md">
+                  <span className="text-[10px] text-slate-500 font-mono">STATION: {sessionId.substring(0,8)}</span>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Transcript Scroll Area */}

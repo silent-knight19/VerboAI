@@ -82,9 +82,16 @@ module.exports = (io, socket) => {
       if (state !== 'LISTENING') return;
 
       // Handle both legacy string and new object format
-      const { text, isFinal } = (typeof data === 'string') 
-        ? { text: data, isFinal: true } 
+      const { text, isFinal, speaker } = (typeof data === 'string') 
+        ? { text: data, isFinal: true, speaker: 0 } 
         : data;
+
+      // SPEAKER MONITORING (Anti-Cheating)
+      // If speaker ID is not 0, it means Deepgram detected a different voice profile.
+      if (speaker > 0) {
+        console.warn(`🚨 Security: Voice Profile mismatch for ${uid} (Speaker ${speaker} detected)`);
+        socket.emit('session:violation', { reason: 'multiple_voices' });
+      }
 
       if (!text || !text.trim()) return;
 
@@ -313,19 +320,24 @@ module.exports = (io, socket) => {
   // ===========================================================================
   let violationCount = 0;
   
-  socket.on('session:violation', () => {
+  socket.on('session:violation', (data) => {
     violationCount++;
-    console.warn(`🚨 Security: Violation detected for ${uid} (Count: ${violationCount})`);
+    const reason = data?.reason || 'tab_switch';
+    console.warn(`🚨 Security: Violation detected for ${uid} (Reason: ${reason}, Count: ${violationCount})`);
+
+    let warningMessage = '⚠️ Warning: Tab switching is PROHIBITED. One more violation will terminate the interview.';
+    
+    if (reason === 'multiple_voices') {
+      warningMessage = '⚠️ Warning: Multiple voices detected. Assistance from others is PROHIBITED.';
+    } else if (reason === 'looking_away') {
+      warningMessage = '⚠️ Warning: You are looking away from the screen too frequently.';
+    } else if (reason === 'not_visible') {
+      warningMessage = '⚠️ Warning: You are not properly visible to the camera.';
+    }
 
     if (violationCount === 1) {
       // Strike 1: Stern Warning
-      socket.emit('session:warning', { 
-        message: '⚠️ Warning: Tab switching is PROHIBITED. One more violation will terminate the interview.' 
-      });
-      // Interrupt AI if speaking
-      if (state === 'SPEAKING') {
-         // Logic to stop audio could go here, but for now we just warn
-      }
+      socket.emit('session:warning', { message: warningMessage });
     } 
     else if (violationCount >= 2) {
       // Strike 2: Termination
@@ -335,7 +347,6 @@ module.exports = (io, socket) => {
         reason: 'violation',
         message: '🚫 Interview Terminated. Integrity violation detected.' 
       });
-      // Ideally, we would also flag the user in the database here
     }
   });
 

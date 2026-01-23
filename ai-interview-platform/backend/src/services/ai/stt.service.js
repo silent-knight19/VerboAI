@@ -58,8 +58,9 @@ class STTService {
       language: AI_CONFIG.STT.DEEPGRAM_LANGUAGE,
       smart_format: true,      // Auto-punctuation
       interim_results: true,   // Get results as user speaks
-      endpointing: 900,        // 500ms silence. We buffer this in the handler now.
+      endpointing: 900,        // 900ms silence detection
       punctuate: true,         // Add punctuation
+      diarize: true,           // NEW: Detect multiple speakers
     });
 
     // Store stream state
@@ -71,6 +72,7 @@ class STTService {
       isReady: false,              // Track if connection is open
       pendingChunks: [],           // Buffer for chunks sent before connection opens
       onTranscript: onTranscript || (() => {}),
+      currentSpeaker: null,        // Track active speaker
     };
     this.streams.set(userId, streamState);
 
@@ -78,11 +80,16 @@ class STTService {
     // EVENT: Transcript Received
     // -------------------------------------------------------------------------
     connection.on(LiveTranscriptionEvents.Transcript, (data) => {
-      const transcript = data.channel.alternatives[0]?.transcript || '';
+      const alternative = data.channel.alternatives[0];
+      const transcript = alternative?.transcript || '';
       const isFinal = data.is_final;
       
+      // Extract Speaker Info (if available from Deepgram Diarization)
+      // Deepgram returns 'speaker' index for each word/segment
+      const speaker = alternative?.words?.[0]?.speaker ?? 0;
+
       if (transcript.trim()) {
-        console.log(`👂 STT [${userId}]: ${isFinal ? '✅' : '⏳'} "${transcript}"`);
+        console.log(`👂 STT [${userId}]: ${isFinal ? '✅' : '⏳'} [Speaker ${speaker}] "${transcript}"`);
         
         // Update voice activity time
         streamState.lastVoiceTime = Date.now();
@@ -91,9 +98,12 @@ class STTService {
           streamState.continuousSpeechStart = Date.now();
         }
         
-        // Send BOTH Interim and Final results to the handler.
-        // The handler needs Interim results to know "User is still speaking" (to reset buffer timer).
-        streamState.onTranscript({ text: transcript, isFinal });
+        // Send transcript with speaker ID
+        streamState.onTranscript({ 
+          text: transcript, 
+          isFinal,
+          speaker: speaker // Pass speaker ID to handler
+        });
       }
     });
 
